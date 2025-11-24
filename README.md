@@ -69,6 +69,11 @@ npm install
 npm run rebuild
 ```
 
+### 启动前编译（编译electron 必须运行）
+```bash
+ npx tsc -p electron/tsconfig.json --watch
+```
+
 ### 开发调试
 
 - 启动开发模式（同时跑 Vite 与 Electron）：
