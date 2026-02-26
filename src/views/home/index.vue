@@ -168,23 +168,23 @@
 
                         <div
                           v-if="jobQueueBatch(msg.task.job_id)"
-                          class="mb-3 rounded-xl p-3 border border-slate-200/70 dark:border-slate-700/40 bg-white/60 dark:bg-slate-900/25"
+                          class="mb-3 rounded-xl p-3 candidate-queue-panel"
                         >
                           <div class="text-xs font-medium mb-2">任务队列状态</div>
                           <div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
-                            <div class="rounded-lg border border-slate-200/70 dark:border-slate-700/40 px-2 py-1">
+                            <div class="rounded-lg px-2 py-1 candidate-queue-metric">
                               <div class="opacity-60">你的队列</div>
                               <div class="font-medium">{{ jobQueueBatch(msg.task.job_id)?.user_pending_count ?? 0 }}</div>
                             </div>
-                            <div class="rounded-lg border border-slate-200/70 dark:border-slate-700/40 px-2 py-1">
+                            <div class="rounded-lg px-2 py-1 candidate-queue-metric">
                               <div class="opacity-60">全局队列</div>
                               <div class="font-medium">{{ jobQueueBatch(msg.task.job_id)?.global_pending_count ?? 0 }}</div>
                             </div>
-                            <div class="rounded-lg border border-slate-200/70 dark:border-slate-700/40 px-2 py-1">
+                            <div class="rounded-lg px-2 py-1 candidate-queue-metric">
                               <div class="opacity-60">已完成</div>
                               <div class="font-medium">{{ jobQueueBatch(msg.task.job_id)?.completed_count ?? 0 }}</div>
                             </div>
-                            <div class="rounded-lg border border-slate-200/70 dark:border-slate-700/40 px-2 py-1">
+                            <div class="rounded-lg px-2 py-1 candidate-queue-metric">
                               <div class="opacity-60">处理中</div>
                               <div class="font-medium truncate">
                                 {{ jobQueueBatch(msg.task.job_id)?.current_processing_item?.title || '暂无' }}
@@ -193,13 +193,15 @@
                           </div>
                           <div v-if="jobQueueCompletedItems(msg.task.job_id).length" class="mt-3 space-y-2">
                             <div class="text-xs opacity-70">已完成视频笔记（可先预览）</div>
-                            <div
-                              v-for="(doneItem, doneIdx) in jobQueueCompletedItems(msg.task.job_id)"
-                              :key="`${doneItem.child_job_id || doneIdx}`"
-                              class="rounded-lg border border-slate-200/70 dark:border-slate-700/40 p-2"
-                            >
-                              <div class="text-xs font-medium mb-1">{{ doneItem.title || `视频 ${doneIdx + 1}` }}</div>
-                              <pre class="text-[11px] leading-5 whitespace-pre-wrap break-words font-sans opacity-85">{{ String(doneItem.note_preview || '').slice(0, 500) }}</pre>
+                            <div class="candidate-queue-done-list">
+                              <div
+                                v-for="(doneItem, doneIdx) in jobQueueCompletedItems(msg.task.job_id)"
+                                :key="`${doneItem.child_job_id || doneIdx}`"
+                                class="rounded-lg p-2 candidate-queue-note"
+                              >
+                                <div class="text-xs font-medium mb-1">{{ doneItem.title || `视频 ${doneIdx + 1}` }}</div>
+                                <pre class="text-[11px] leading-5 whitespace-pre-wrap break-words font-sans opacity-85 candidate-queue-note-preview">{{ String(doneItem.note_preview || '').slice(0, 500) }}</pre>
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -400,7 +402,7 @@
           </template>
 
           <template v-if="jobsStore.currentJobId">
-            <div class="h-full flex flex-col gap-3">
+            <div class="h-full min-h-0 flex flex-col gap-3 overflow-auto pr-1 right-rail-scroll">
               <div class="rail-section rail-section--meta">
                 <div class="text-xs opacity-70 mb-1">当前任务ID</div>
                 <div class="font-mono text-xs break-all">{{ jobsStore.currentJobId }}</div>
@@ -470,7 +472,7 @@
                     class="rail-subpanel p-2"
                   >
                     <div class="text-xs font-medium mb-1">{{ doneItem.title || `视频 ${idx + 1}` }}</div>
-                    <pre class="text-[11px] leading-5 whitespace-pre-wrap break-words font-sans">{{ String(doneItem.note_preview || '').slice(0, 260) }}</pre>
+                    <pre class="text-[11px] leading-5 whitespace-pre-wrap break-words font-sans rail-note-preview">{{ String(doneItem.note_preview || '').slice(0, 260) }}</pre>
                   </div>
                 </div>
               </div>
@@ -1651,7 +1653,18 @@ function humanizeSidebarLog(text: string) {
 :deep(.right-rail-card > .n-card__content) {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+:deep(.right-rail-card) {
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border: 1px solid rgba(203, 213, 225, 0.82);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
 }
 
 :deep(.home-main-card > .n-card__content) {
@@ -1666,8 +1679,7 @@ function humanizeSidebarLog(text: string) {
   border-radius: 14px;
   padding: 12px;
   border: 1px solid rgba(203, 213, 225, 0.72);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(248, 250, 252, 0.86));
+  background: #fff;
   box-shadow: 0 10px 24px rgba(15, 23, 42, 0.035);
   --rail-accent: rgba(148, 163, 184, 0.45);
 }
@@ -1702,8 +1714,50 @@ function humanizeSidebarLog(text: string) {
 .rail-subpanel {
   border-radius: 10px;
   border: 1px solid rgba(226, 232, 240, 0.9);
-  background: rgba(255, 255, 255, 0.66);
+  background: rgba(255, 255, 255, 0.95);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75);
+}
+
+.right-rail-scroll {
+  scrollbar-gutter: stable;
+}
+
+.rail-note-preview {
+  max-height: 132px;
+  overflow: auto;
+  margin: 0;
+  padding-right: 2px;
+}
+
+.candidate-queue-panel {
+  border: 1px solid rgba(203, 213, 225, 0.76);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.04);
+}
+
+.candidate-queue-metric {
+  border: 1px solid rgba(203, 213, 225, 0.78);
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+.candidate-queue-done-list {
+  max-height: 280px;
+  overflow: auto;
+  padding-right: 2px;
+  display: grid;
+  gap: 8px;
+}
+
+.candidate-queue-note {
+  border: 1px solid rgba(203, 213, 225, 0.78);
+  background: rgba(255, 255, 255, 0.98);
+}
+
+.candidate-queue-note-preview {
+  max-height: 140px;
+  overflow: auto;
+  margin: 0;
 }
 
 :global(.dark) .rail-section {
@@ -1711,6 +1765,12 @@ function humanizeSidebarLog(text: string) {
   background:
     linear-gradient(180deg, rgba(30, 41, 59, 0.58), rgba(15, 23, 42, 0.46));
   box-shadow: 0 12px 24px rgba(0, 0, 0, 0.22);
+}
+
+:global(.dark) :deep(.right-rail-card) {
+  background: rgba(17, 24, 39, 0.94);
+  border-color: rgba(75, 85, 99, 0.72);
+  box-shadow: 0 12px 26px rgba(0, 0, 0, 0.3);
 }
 
 :global(.dark) .rail-section--meta {
@@ -1733,6 +1793,18 @@ function humanizeSidebarLog(text: string) {
   border-color: rgba(71, 85, 105, 0.6);
   background: rgba(15, 23, 42, 0.34);
   box-shadow: inset 0 1px 0 rgba(148, 163, 184, 0.03);
+}
+
+:global(.dark) .candidate-queue-panel {
+  border-color: rgba(71, 85, 105, 0.66);
+  background: rgba(15, 23, 42, 0.46);
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.22);
+}
+
+:global(.dark) .candidate-queue-metric,
+:global(.dark) .candidate-queue-note {
+  border-color: rgba(71, 85, 105, 0.6);
+  background: rgba(15, 23, 42, 0.34);
 }
 
 .send-icon-btn {
@@ -1874,8 +1946,8 @@ function humanizeSidebarLog(text: string) {
 }
 
 .ai-candidate-panel {
-  background: rgba(248, 250, 252, 0.95);
-  border: 1px solid rgba(203, 213, 225, 0.65);
+  background: #fff;
+  border: 1px solid rgba(203, 213, 225, 0.76);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65), 0 6px 18px rgba(15, 23, 42, 0.05);
 }
 
@@ -1926,7 +1998,7 @@ function humanizeSidebarLog(text: string) {
 
 .ai-candidate-preview {
   border: 1px solid rgba(203, 213, 225, 0.78);
-  background: rgba(255, 255, 255, 0.4);
+  background: rgba(255, 255, 255, 0.98);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55);
 }
 

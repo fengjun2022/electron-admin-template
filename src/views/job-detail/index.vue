@@ -1,5 +1,5 @@
 <template>
-  <div class="p-4 h-full overflow-auto">
+  <div class="p-4 h-full overflow-auto job-detail-page">
     <n-space vertical size="large">
       <n-card :title="`任务详情 · ${jobId}`" :bordered="false">
         <n-space justify="space-between" align="center">
@@ -98,7 +98,7 @@
         <n-gi>
           <n-card title="AI 过程日志" :bordered="false">
 
-            <div ref="aiLogsContainerRef" class="h-[420px] overflow-auto rounded-md p-3 bg-black/10 dark:bg-white/5">
+            <div ref="aiLogsContainerRef" class="h-[420px] overflow-auto rounded-md p-3 job-scroll-panel">
               <template v-if="displayLogs.length">
                 <div
                   v-for="(log, idx) in displayLogs"
@@ -181,7 +181,7 @@
                 <div class="text-xs opacity-70 mb-2">
                   这里显示的是“实时连接通道”推送的进度播报，可以理解为系统在边做边汇报。
                 </div>
-                <div class="h-[320px] overflow-auto rounded-md p-3 bg-black/10 dark:bg-white/5">
+                <div class="h-[320px] overflow-auto rounded-md p-3 job-scroll-panel">
                   <template v-if="displayEvents.length">
                     <div
                       v-for="(ev, idx) in displayEvents"
@@ -236,7 +236,7 @@
 
         <div
           v-if="noteTextLocal"
-          class="rounded-xl border border-slate-200/80 dark:border-slate-700/60 bg-white/80 dark:bg-slate-900/35 p-4 max-h-[70vh] overflow-auto"
+          class="rounded-xl p-4 max-h-[70vh] overflow-auto job-note-surface"
         >
           <MarkdownContent :source="noteTextLocal" />
         </div>
@@ -663,3 +663,41 @@ onBeforeUnmount(() => {
   if (jobId.value) jobsStore.disconnectJobEvents(jobId.value)
 })
 </script>
+
+<style scoped>
+.job-detail-page {
+  background: transparent;
+}
+
+.job-scroll-panel {
+  border: 1px solid rgba(203, 213, 225, 0.72);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85);
+}
+
+.job-note-surface {
+  border: 1px solid rgba(203, 213, 225, 0.78);
+  background: #fff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 8px 20px rgba(15, 23, 42, 0.04);
+}
+
+.job-note-surface :deep(.md-content) {
+  color: #1f2937;
+}
+
+:global(.dark) .job-scroll-panel {
+  border-color: rgba(71, 85, 105, 0.66);
+  background: rgba(15, 23, 42, 0.44);
+  box-shadow: inset 0 1px 0 rgba(148, 163, 184, 0.03);
+}
+
+:global(.dark) .job-note-surface {
+  border-color: rgba(71, 85, 105, 0.66);
+  background: rgba(15, 23, 42, 0.62);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
+}
+
+:global(.dark) .job-note-surface :deep(.md-content) {
+  color: rgba(226, 232, 240, 0.96);
+}
+</style>
