@@ -179,7 +179,7 @@ const fixedItems = ref<FixedItem[]>([
     label: '新对话',
     icon: markRaw(AddOutline),
     cb: () => {
-      router.push('/home')
+      router.push({ path: '/home', query: { newChat: String(Date.now()) } })
     },
   },
   {

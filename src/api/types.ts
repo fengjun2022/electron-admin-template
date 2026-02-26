@@ -173,3 +173,70 @@ export type JobEvent =
   | { type: 'failed'; ts?: string; error?: string; traceback?: string }
   | { ts?: string }
 
+export interface ChatSession {
+  id?: number
+  session_uuid: string
+  user_id?: number
+  title?: string
+  created_at?: string
+  updated_at?: string
+  last_message_at?: string | null
+}
+
+export interface ChatMessage {
+  id?: number
+  role: 'user' | 'assistant' | string
+  content: string
+  meta?: {
+    auto_task?: boolean
+    model_name?: string | null
+    tool_decision?: {
+      should_create_job?: boolean
+      reason?: string
+    }
+    task?: JobCreateResponse | null
+    [key: string]: unknown
+  }
+  created_at?: string
+}
+
+export interface ChatModelItem {
+  id?: number
+  model_name: string
+  display_name?: string
+  provider?: string
+  sort_order?: number
+  is_enabled?: number
+}
+
+export interface ChatSessionCreateResponse {
+  ok: boolean
+  session: ChatSession
+}
+
+export interface ChatModelsResponse {
+  ok: boolean
+  items: ChatModelItem[]
+}
+
+export interface ChatMessagesResponse {
+  ok: boolean
+  items: ChatMessage[]
+}
+
+export interface ChatReplyRequest {
+  content: string
+  model_name?: string
+  auto_task?: boolean
+}
+
+export interface ChatReplyResponse {
+  ok: boolean
+  session_uuid: string
+  assistant_message: ChatMessage
+  task: JobCreateResponse | null
+  tool_decision?: {
+    should_create_job?: boolean
+    reason?: string
+  }
+}
