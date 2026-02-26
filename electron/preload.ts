@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on(channel, (_, ...args) => func(...args)),
   invoke: (channel: string, data?: any) => ipcRenderer.invoke(channel, data),
   db: {
+    isAvailable: () => ipcRenderer.invoke('db:isAvailable') as Promise<boolean>,
     // system_setting
     insertSystemSetting: (templateBaseUrl: string, reportSave: string) =>
       ipcRenderer.invoke('db:insertSystemSetting', { templateBaseUrl, reportSave }) as Promise<number>,

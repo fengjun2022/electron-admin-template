@@ -16,7 +16,7 @@ export function generateMenuFromRouter(router: Router): MenuItem[] {
     if (!root || !root.children) return []
 
     return root.children
-        .filter(r => r.name && r.meta?.title) // 必须有 name + title 才能作为菜单
+        .filter(r => r.name && r.meta?.title && !(r.meta as any)?.hideInMenu) // 必须有 name + title 才能作为菜单
         .map(r => ({
             key: r.name as string,
             label: r.meta!.title as string,

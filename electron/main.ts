@@ -1,14 +1,5 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
 import path from 'path'
-import { initDatabase } from './db'
-import {
-  insertSystemSetting,
-  getSystemSetting,
-  updateSystemSetting,
-  listTemplates,
-  insertTemplate,
-  deleteTemplate,
-} from './repository'
 
 let loginWindow: BrowserWindow | null = null
 let mainWindow: BrowserWindow | null = null
@@ -79,33 +70,68 @@ const createMainWindow = () => {
   return mainWindow
 }
 
-app.whenReady().then(() => {
-  // 启动自动建表 + 默认数据
-  initDatabase()
-  // IPC handlers (Drizzle + better-sqlite3)
-  ipcMain.handle('db:insertSystemSetting', (_e, payload: { templateBaseUrl: string; reportSave: string }) => {
-    return insertSystemSetting(payload.templateBaseUrl, payload.reportSave)
-  })
-  ipcMain.handle('db:getSystemSetting', () => {
-    return getSystemSetting()
-  })
-  ipcMain.handle('db:updateSystemSetting', (_e, payload: { id: number; data: Record<string, unknown> }) => {
-    return updateSystemSetting(payload.id, payload.data as any)
-  })
+function registerDbFallbackHandlers(reason: unknown) {
+  console.warn('[electron-main] SQLite/Drizzle 模块不可用，启用无数据库降级模式', reason)
 
-  ipcMain.handle('db:insertTemplate', (_e, payload: { fileUrl: string }) => {
-    return insertTemplate(payload.fileUrl)
-  })
-  // 兼容旧通道名（如之前使用过）
-  ipcMain.handle('db:addTemplate', (_e, payload: { fileUrl: string }) => {
-    return insertTemplate(payload.fileUrl)
-  })
-  ipcMain.handle('db:listTemplates', () => {
-    return listTemplates()
-  })
-  ipcMain.handle('db:deleteTemplate', (_e, payload: { id: number }) => {
-    return deleteTemplate(payload.id)
-  })
+  ipcMain.handle('db:insertSystemSetting', async () => 0)
+  ipcMain.handle('db:getSystemSetting', async () => null)
+  ipcMain.handle('db:updateSystemSetting', async () => undefined)
+
+  ipcMain.handle('db:insertTemplate', async () => 0)
+  ipcMain.handle('db:addTemplate', async () => 0)
+  ipcMain.handle('db:listTemplates', async () => [])
+  ipcMain.handle('db:deleteTemplate', async () => undefined)
+
+  ipcMain.handle('db:isAvailable', async () => false)
+}
+
+async function registerDbHandlers() {
+  if (process.env.ELECTRON_DISABLE_SQLITE === '1') {
+    registerDbFallbackHandlers('ELECTRON_DISABLE_SQLITE=1')
+    return
+  }
+
+  try {
+    const dbMod = await import('./db')
+    const repoMod = await import('./repository')
+
+    // 启动自动建表 + 默认数据
+    dbMod.initDatabase()
+
+    // IPC handlers (Drizzle + better-sqlite3)
+    ipcMain.handle('db:insertSystemSetting', (_e, payload: { templateBaseUrl: string; reportSave: string }) => {
+      return repoMod.insertSystemSetting(payload.templateBaseUrl, payload.reportSave)
+    })
+    ipcMain.handle('db:getSystemSetting', () => {
+      return repoMod.getSystemSetting()
+    })
+    ipcMain.handle('db:updateSystemSetting', (_e, payload: { id: number; data: Record<string, unknown> }) => {
+      return repoMod.updateSystemSetting(payload.id, payload.data as any)
+    })
+
+    ipcMain.handle('db:insertTemplate', (_e, payload: { fileUrl: string }) => {
+      return repoMod.insertTemplate(payload.fileUrl)
+    })
+    // 兼容旧通道名（如之前使用过）
+    ipcMain.handle('db:addTemplate', (_e, payload: { fileUrl: string }) => {
+      return repoMod.insertTemplate(payload.fileUrl)
+    })
+    ipcMain.handle('db:listTemplates', () => {
+      return repoMod.listTemplates()
+    })
+    ipcMain.handle('db:deleteTemplate', (_e, payload: { id: number }) => {
+      return repoMod.deleteTemplate(payload.id)
+    })
+
+    ipcMain.handle('db:isAvailable', async () => true)
+    console.log('[electron-main] SQLite/Drizzle 数据库模块已启用')
+  } catch (e) {
+    registerDbFallbackHandlers(e)
+  }
+}
+
+app.whenReady().then(async () => {
+  await registerDbHandlers()
 
   // Open login window first
   createLoginWindow()

@@ -77,6 +77,7 @@ import {
 } from 'naive-ui'
 import { EyeOutline, EyeOffOutline } from '@vicons/ionicons5'
 import { useUserStore } from '@/stores/modules/useUserStore'
+import { useAuthStore } from '@/stores/modules/useAuthStore'
 import { useGlobalStore } from '@/stores/global-store'
 import { storeToRefs } from 'pinia'
 import { getThemeColors } from '@/config/theme'
@@ -84,11 +85,10 @@ import { getThemeColors } from '@/config/theme'
 const router = useRouter()
 const message = useMessage()
 const userStore = useUserStore()
+const authStore = useAuthStore()
 const formRef = ref<FormInst | null>(null)
 const showPassword = ref(false)
 const loading = ref(false)
-import { darkTheme } from 'naive-ui'
-
 // theme
 const globalStore = useGlobalStore()
 const { isDarkMode } = storeToRefs(globalStore)
@@ -113,28 +113,18 @@ const submit = async () => {
     if (!errors) {
       loading.value = true
       try {
-      //   const res = await userLogin<any>({
-      //     username: formData.username,
-      //     password: formData.password,
-      //   })
-      //
-      //   if (res.code === 200) {
-      //     // userStore.setUserInfo(res.data)
-      //     // 获取完整用户信息
-      //     // await userStore.getUserInfoData()
-      //     message.success('登录成功！')
-      //
-      //   } else {
-      //     message.error(res.msg || '登录失败')
-      //   }
+        const res = await authStore.login(formData.username, formData.password)
+        userStore.userName = res.user.display_name || res.user.username
+        userStore.personalizedSignature = 'B站知识检索与转笔记'
+        message.success('登录成功！')
         // In Electron, open main window via IPC; in web, fallback to router
         if ((window as any)?.electronAPI?.openMainWindow) {
           (window as any).electronAPI.openMainWindow()
         } else {
-          await router.push({ path: '/' })
+          await router.push({ path: '/home' })
         }
-      } catch (error) {
-        message.error('登录失败，请稍后重试')
+      } catch (error: any) {
+        message.error(error?.message || '登录失败，请稍后重试')
       } finally {
         loading.value = false
       }

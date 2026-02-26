@@ -1,6 +1,6 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
-import {BrowsersOutline, ReaderOutline} from "@vicons/ionicons5";
+import { BrowsersOutline, ReaderOutline, DocumentTextOutline, CogOutline } from "@vicons/ionicons5";
 // Route definitions
 const routes: Array<RouteRecordRaw> = [
   {
@@ -11,8 +11,20 @@ const routes: Array<RouteRecordRaw> = [
       {
         path: '/home',
         name: 'Home',
-        meta: { title: '报告生成',icon: ReaderOutline },
+        meta: { title: 'AI任务中心',icon: ReaderOutline },
         component: () => import('@/views/home/index.vue'),
+      },
+      {
+        path: '/jobs/:jobId',
+        name: 'JobDetail',
+        meta: { title: '任务详情', icon: DocumentTextOutline, hideInMenu: true },
+        component: () => import('@/views/job-detail/index.vue'),
+      },
+      {
+        path: '/prompt-studio',
+        name: 'PromptStudio',
+        meta: { title: 'Prompt设置', icon: CogOutline },
+        component: () => import('@/views/prompt-studio/index.vue'),
       },
         {
             path: '/tem',
@@ -45,6 +57,13 @@ router.beforeEach((to, from) => {
   // const isAuthed = true // TODO: replace with real auth state
   // if (to.meta?.requiresAuth && !isAuthed) return { name: 'Home' }
   // Returning void/true continues navigation
+  const token = typeof window !== 'undefined' ? (localStorage.getItem('robot_web_auth_token') || '') : ''
+  if (to.path !== '/login' && !token) {
+    return { path: '/login' }
+  }
+  if (to.path === '/login' && token) {
+    return { path: '/home' }
+  }
   return true
 })
 

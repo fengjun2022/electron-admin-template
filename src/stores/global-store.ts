@@ -2,6 +2,7 @@ import { ref, computed, watch } from 'vue'
 import { defineStore } from 'pinia'
 import router from '@/router'
 import { useUserStore } from '@/stores/modules/useUserStore'
+import { useAuthStore } from '@/stores/modules/useAuthStore'
 
 export const useGlobalStore = defineStore('global', () => {
   // state
@@ -41,7 +42,9 @@ export const useGlobalStore = defineStore('global', () => {
 
     const logout =() => {
             const userStore = useUserStore()
+            const authStore = useAuthStore()
             userStore.cleanUserInfo()
+            authStore.logout()
             if ((window as any)?.electronAPI?.logoutToLoginWindow) {
               ;(window as any).electronAPI.logoutToLoginWindow()
             } else {
