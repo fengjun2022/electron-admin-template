@@ -108,6 +108,21 @@ export const useJobsStore = defineStore('jobs', {
               jobUi.snapshot = { ...jobUi.snapshot, stage: d.stage || '', detail: d.detail || '' }
             }
           }
+          if (type === 'topic_selected_videos') {
+            const d = data as any
+            const items = Array.isArray(d?.items) ? d.items : []
+            if (jobUi.snapshot) {
+              const prevResult = (jobUi.snapshot.result as Record<string, unknown> | null) || {}
+              jobUi.snapshot = {
+                ...jobUi.snapshot,
+                kind: (jobUi.snapshot.kind || 'topic') as any,
+                result: {
+                  ...prevResult,
+                  selected_videos: items,
+                } as any,
+              }
+            }
+          }
           if (type === 'log') {
             const d = data as any
             jobUi.logs.push({ ts: d.ts, message: d.message || '' })

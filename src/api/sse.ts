@@ -25,7 +25,7 @@ export function openJobEventsSSE(url: string, handlers: Handlers = {}) {
     handlers.onEvent?.('snapshot', data)
   })
 
-  ;['job_created', 'status', 'log', 'heartbeat'].forEach((evtName) => {
+  ;['job_created', 'status', 'log', 'heartbeat', 'topic_selected_videos'].forEach((evtName) => {
     es.addEventListener(evtName, (e) => {
       const data = parse(e as MessageEvent) as JobEvent
       handlers.onEvent?.(evtName, data)
