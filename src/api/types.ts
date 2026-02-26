@@ -1,4 +1,4 @@
-export type JobStatus = 'queued' | 'running' | 'completed' | 'failed'
+export type JobStatus = 'queued' | 'running' | 'waiting_user_pick' | 'completed' | 'failed'
 export type JobKind = 'single_video' | 'topic' | 'unknown'
 
 export interface PromptSettings {
@@ -85,15 +85,63 @@ export interface JobCreateResponse {
 export interface VideoRunState {
   bili_url: string
   title?: string
-  status: 'pending' | 'completed' | 'failed'
+  status: 'pending' | 'waiting_user_pick' | 'queued' | 'running' | 'completed' | 'failed'
   index?: number
   error?: string
+  child_job_id?: string
+  note_preview?: string
+  note_ready?: boolean
+  queue_item_status?: string
+  queue_runtime?: Record<string, unknown>
   pipeline_result?: {
     task_state?: string
     note_md?: string
     transcript_text_len?: number
     note_model?: string
+    knowledge_reused?: boolean
   }
+}
+
+export interface QueueRuntimeInfo {
+  job_id?: string
+  queue_status?: string
+  global_position?: number | null
+  user_position?: number | null
+  global_pending_count?: number
+  user_pending_count?: number
+  queue_group_id?: string
+  parent_job_id?: string
+  worker_id?: string
+}
+
+export interface TopicQueueBatchSummary {
+  queue_group_id?: string
+  parent_job_id?: string
+  chat_session_uuid?: string
+  status?: string
+  all_selected_count?: number
+  selected_count?: number
+  queued_count?: number
+  running_count?: number
+  completed_count?: number
+  failed_count?: number
+  waiting_pick_count?: number
+  global_pending_count?: number
+  user_pending_count?: number
+  current_processing_item?: {
+    index?: number
+    title?: string
+    child_job_id?: string
+  } | null
+  completed_items?: Array<{
+    index?: number
+    title?: string
+    bili_url?: string
+    child_job_id?: string
+    note_preview?: string
+    knowledge_reused?: boolean
+  }>
+  items?: VideoRunState[]
 }
 
 export interface TopicSelectedVideo {
@@ -118,17 +166,21 @@ export interface SingleVideoJobResult {
   note_md?: string
   note_model?: string
   task_state?: string
+  queue_runtime?: QueueRuntimeInfo
   cleanup_deleted?: Record<string, string>
 }
 
 export interface TopicJobResult {
   mode: 'topic_multi_search'
+  task_state?: string
   topic_session_state?: string
   merged_note_md?: string
   merged_note_model?: string
   selected_videos?: TopicSelectedVideo[]
   video_count?: number
   video_runs?: VideoRunState[]
+  queue_batch?: TopicQueueBatchSummary
+  queue_runtime?: QueueRuntimeInfo
 }
 
 export interface JobSnapshot {
@@ -279,4 +331,40 @@ export interface ChatSelectCandidateVideoResponse {
   selected_video?: TopicSelectedVideo | null
   task: JobCreateResponse | null
   assistant_message?: ChatMessage | null
+  queue_batch?: TopicQueueBatchSummary | null
+}
+
+export interface ChatSelectCandidateVideosBatchRequest {
+  video_indexes?: number[]
+  video_urls?: string[]
+}
+
+export interface ChatSelectCandidateVideosBatchResponse {
+  ok: boolean
+  session_uuid: string
+  parent_job_id: string
+  queue_group_id?: string
+  enqueued_tasks?: Array<{
+    job_id: string
+    title?: string
+    video_url?: string
+    status?: string
+    index?: number
+  }>
+  skipped_existing?: Array<Record<string, unknown>>
+  assistant_message?: ChatMessage | null
+  queue_batch?: TopicQueueBatchSummary | null
+}
+
+export interface ChatJobNoteMessageRequest {
+  markdown_text: string
+  file_name?: string
+}
+
+export interface ChatJobNoteMessageResponse {
+  ok: boolean
+  session_uuid: string
+  job_id: string
+  created: boolean
+  assistant_message: ChatMessage
 }

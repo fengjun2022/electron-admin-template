@@ -108,6 +108,16 @@ export const useJobsStore = defineStore('jobs', {
               jobUi.snapshot = { ...jobUi.snapshot, stage: d.stage || '', detail: d.detail || '' }
             }
           }
+          if (type === 'waiting_user_pick') {
+            const d = data as any
+            if (jobUi.snapshot) {
+              jobUi.snapshot = {
+                ...jobUi.snapshot,
+                status: 'waiting_user_pick' as any,
+                result: (d?.result ?? jobUi.snapshot.result) as any,
+              }
+            }
+          }
           if (type === 'topic_selected_videos') {
             const d = data as any
             const items = Array.isArray(d?.items) ? d.items : []
@@ -122,6 +132,26 @@ export const useJobsStore = defineStore('jobs', {
                 } as any,
               }
             }
+          }
+          if (type === 'queue_status') {
+            const d = data as any
+            if (jobUi.snapshot) {
+              const prevResult = (jobUi.snapshot.result as Record<string, unknown> | null) || {}
+              jobUi.snapshot = {
+                ...jobUi.snapshot,
+                result: {
+                  ...prevResult,
+                  ...(d?.queue ? { queue_runtime: d.queue } : {}),
+                  ...(d?.queue_batch ? { queue_batch: d.queue_batch } : {}),
+                } as any,
+              }
+            }
+          }
+          if (type === 'child_note_ready') {
+            const d = data as any
+            const title = String(d?.title || '候选视频')
+            jobUi.logs.push({ ts: d?.ts, message: `${title} 笔记已完成，可先预览` })
+            if (jobUi.logs.length > 2000) jobUi.logs = jobUi.logs.slice(-1200)
           }
           if (type === 'log') {
             const d = data as any

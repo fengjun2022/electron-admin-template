@@ -2,8 +2,12 @@ import { apiRequest, buildApiUrl, getAuthToken } from './client'
 import type {
   ChatSelectCandidateVideoRequest,
   ChatSelectCandidateVideoResponse,
+  ChatSelectCandidateVideosBatchRequest,
+  ChatSelectCandidateVideosBatchResponse,
   ChatMessagesResponse,
   ChatModelsResponse,
+  ChatJobNoteMessageRequest,
+  ChatJobNoteMessageResponse,
   ChatReplyRequest,
   ChatReplyResponse,
   ChatSessionsResponse,
@@ -60,6 +64,30 @@ export function selectChatCandidateVideoApi(
   payload: ChatSelectCandidateVideoRequest,
 ) {
   return apiRequest<ChatSelectCandidateVideoResponse>(`/chat/sessions/${sessionUuid}/jobs/${jobId}/select-video`, {
+    method: 'POST',
+    body: payload,
+    auth: true,
+  })
+}
+
+export function selectChatCandidateVideosBatchApi(
+  sessionUuid: string,
+  jobId: string,
+  payload: ChatSelectCandidateVideosBatchRequest,
+) {
+  return apiRequest<ChatSelectCandidateVideosBatchResponse>(`/chat/sessions/${sessionUuid}/jobs/${jobId}/select-videos-batch`, {
+    method: 'POST',
+    body: payload,
+    auth: true,
+  })
+}
+
+export function saveChatJobNoteMessageApi(
+  sessionUuid: string,
+  jobId: string,
+  payload: ChatJobNoteMessageRequest,
+) {
+  return apiRequest<ChatJobNoteMessageResponse>(`/chat/sessions/${sessionUuid}/jobs/${jobId}/note-message`, {
     method: 'POST',
     body: payload,
     auth: true,

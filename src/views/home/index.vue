@@ -52,9 +52,10 @@
                       {{ msg.role === 'user' ? currentUserLabel : '小知AI' }}
                     </div>
                     <div
-                      class="rounded-2xl px-4 py-3 whitespace-pre-wrap break-words message-bubble"
+                      class="rounded-2xl px-4 py-3 message-bubble"
                       :class="[
                         msg.role === 'user' ? 'message-user' : 'message-assistant',
+                        msg.renderAsMarkdown ? 'message-bubble--markdown' : 'whitespace-pre-wrap break-words',
                         msg.pending ? 'message-pending' : '',
                         msg.pending ? 'opacity-70' : '',
                       ]"
@@ -64,6 +65,12 @@
                         <span class="thinking-indicator__dots" aria-hidden="true">
                           <i></i><i></i><i></i>
                         </span>
+                      </div>
+                      <div v-else-if="msg.renderAsMarkdown">
+                        <div v-if="msg.markdownLabel" class="text-[11px] opacity-60 mb-2">
+                          {{ msg.markdownLabel }}
+                        </div>
+                        <MarkdownContent :source="msg.content" />
                       </div>
                       <div v-else>{{ msg.content }}</div>
                     </div>
@@ -137,47 +144,138 @@
                     >
                       <div
                         v-if="jobVideoCandidates(msg.task.job_id).length"
-                        class="rounded-2xl p-3 border border-slate-200/80 bg-white/70 dark:bg-slate-900/30 dark:border-slate-700/60"
+                        class="rounded-2xl p-3 ai-candidate-panel"
                       >
-                        <div class="text-xs opacity-70 mb-2">AI 挑选的相关视频（可播放预览）</div>
+                        <div class="mb-2 flex items-center justify-between gap-2">
+                          <div class="text-xs ai-candidate-panel__title">AI 挑选的相关视频（可多选加入任务队列）</div>
+                          <div class="flex items-center gap-2">
+                            <span class="text-[11px] opacity-70">
+                              已选 {{ selectedCandidateCount(msg.task.job_id) }} / {{ jobVideoCandidates(msg.task.job_id).length }}
+                            </span>
+                            <n-button size="tiny" secondary @click="selectAllCandidates(msg.task.job_id)">全选</n-button>
+                            <n-button size="tiny" secondary @click="clearSelectedCandidates(msg.task.job_id)">清空</n-button>
+                            <n-button
+                              size="tiny"
+                              type="primary"
+                              @click="selectCandidateVideosBatch(msg.task.job_id)"
+                              :loading="isBatchSelecting(msg.task.job_id)"
+                              :disabled="!chatSessionUuid || selectedCandidateCount(msg.task.job_id) === 0"
+                            >
+                              总结选中视频
+                            </n-button>
+                          </div>
+                        </div>
+
+                        <div
+                          v-if="jobQueueBatch(msg.task.job_id)"
+                          class="mb-3 rounded-xl p-3 border border-slate-200/70 dark:border-slate-700/40 bg-white/60 dark:bg-slate-900/25"
+                        >
+                          <div class="text-xs font-medium mb-2">任务队列状态</div>
+                          <div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                            <div class="rounded-lg border border-slate-200/70 dark:border-slate-700/40 px-2 py-1">
+                              <div class="opacity-60">你的队列</div>
+                              <div class="font-medium">{{ jobQueueBatch(msg.task.job_id)?.user_pending_count ?? 0 }}</div>
+                            </div>
+                            <div class="rounded-lg border border-slate-200/70 dark:border-slate-700/40 px-2 py-1">
+                              <div class="opacity-60">全局队列</div>
+                              <div class="font-medium">{{ jobQueueBatch(msg.task.job_id)?.global_pending_count ?? 0 }}</div>
+                            </div>
+                            <div class="rounded-lg border border-slate-200/70 dark:border-slate-700/40 px-2 py-1">
+                              <div class="opacity-60">已完成</div>
+                              <div class="font-medium">{{ jobQueueBatch(msg.task.job_id)?.completed_count ?? 0 }}</div>
+                            </div>
+                            <div class="rounded-lg border border-slate-200/70 dark:border-slate-700/40 px-2 py-1">
+                              <div class="opacity-60">处理中</div>
+                              <div class="font-medium truncate">
+                                {{ jobQueueBatch(msg.task.job_id)?.current_processing_item?.title || '暂无' }}
+                              </div>
+                            </div>
+                          </div>
+                          <div v-if="jobQueueCompletedItems(msg.task.job_id).length" class="mt-3 space-y-2">
+                            <div class="text-xs opacity-70">已完成视频笔记（可先预览）</div>
+                            <div
+                              v-for="(doneItem, doneIdx) in jobQueueCompletedItems(msg.task.job_id)"
+                              :key="`${doneItem.child_job_id || doneIdx}`"
+                              class="rounded-lg border border-slate-200/70 dark:border-slate-700/40 p-2"
+                            >
+                              <div class="text-xs font-medium mb-1">{{ doneItem.title || `视频 ${doneIdx + 1}` }}</div>
+                              <pre class="text-[11px] leading-5 whitespace-pre-wrap break-words font-sans opacity-85">{{ String(doneItem.note_preview || '').slice(0, 500) }}</pre>
+                            </div>
+                          </div>
+                        </div>
                         <div class="space-y-3">
                           <div
                             v-for="(video, idx) in jobVideoCandidates(msg.task.job_id)"
                             :key="`${msg.task.job_id}-${video.url || video.title || idx}`"
-                            class="rounded-xl border border-slate-200/80 dark:border-slate-700/50 p-3 bg-white/70 dark:bg-slate-800/30"
+                            class="rounded-2xl p-3 ai-candidate-card"
                           >
                             <div class="flex items-start gap-3">
-                              <div class="w-28 shrink-0">
-                                <div class="rounded-lg overflow-hidden border border-slate-200/80 dark:border-slate-700/50 bg-slate-100 dark:bg-slate-900/40">
+                              <div class="w-32 shrink-0">
+                                <div class="rounded-xl overflow-hidden ai-candidate-cover">
                                   <img
                                     v-if="videoCoverUrl(video)"
                                     :src="videoCoverUrl(video) || undefined"
                                     alt="视频封面"
                                     class="w-full aspect-video object-cover"
                                     loading="lazy"
+                                    referrerpolicy="no-referrer"
                                   />
                                   <div v-else class="w-full aspect-video flex items-center justify-center text-[11px] opacity-60">
-                                    无封面
+                                    暂无封面
                                   </div>
                                 </div>
                               </div>
 
                               <div class="min-w-0 flex-1">
-                                <div class="text-sm font-medium leading-5 break-words">
-                                  {{ video.title || `候选视频 ${idx + 1}` }}
+                                <label class="inline-flex items-center gap-2 text-xs mb-1 opacity-80 cursor-pointer select-none">
+                                  <input
+                                    type="checkbox"
+                                    :checked="isCandidateSelected(msg.task.job_id, video)"
+                                    @change="toggleCandidateSelected(msg.task.job_id, video)"
+                                  />
+                                  <span>加入队列后总结笔记</span>
+                                </label>
+                                <div class="text-sm font-semibold leading-5 break-words ai-candidate-card__title">
+                                  {{ candidateDisplayTitle(video, idx) }}
                                 </div>
-                                <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs opacity-70">
+                                <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs ai-candidate-card__meta">
                                   <span v-if="video.up">UP：{{ String(video.up) }}</span>
                                   <span v-if="video.duration">时长：{{ String(video.duration) }}</span>
                                 </div>
-                                <div v-if="video.reason" class="text-xs opacity-70 mt-2 break-words">
+                                <div v-if="candidateStatItems(video).length" class="mt-2 flex flex-wrap gap-2">
+                                  <span
+                                    v-for="(it, statIdx) in candidateStatItems(video)"
+                                    :key="`${statIdx}-${it.label}-${it.value}`"
+                                    class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] ai-candidate-chip"
+                                  >
+                                    {{ it.label }} {{ it.value }}
+                                  </span>
+                                </div>
+                                <div v-if="video.reason" class="text-xs mt-2 break-words ai-candidate-card__reason">
                                   推荐理由：{{ String(video.reason) }}
                                 </div>
-                                <div v-if="video.from_keyword" class="text-xs opacity-60 mt-1">
+                                <div v-if="video.from_keyword" class="text-xs mt-1 ai-candidate-card__keyword">
                                   关键词：{{ String(video.from_keyword) }}
                                 </div>
-                                <div v-if="video.stats" class="text-xs opacity-60 mt-1 break-words">
-                                  {{ String(video.stats) }}
+                                <div
+                                  v-if="candidateQueueItem(msg.task.job_id, video)"
+                                  class="mt-2 flex flex-wrap items-center gap-2 text-[11px]"
+                                >
+                                  <span class="inline-flex items-center rounded-full px-2 py-0.5 ai-candidate-chip">
+                                    {{ candidateQueueStatusLabel(candidateQueueItem(msg.task.job_id, video)?.status) }}
+                                  </span>
+                                  <span
+                                    v-if="candidateQueueItem(msg.task.job_id, video)?.queue_runtime?.user_position"
+                                    class="opacity-75"
+                                  >
+                                    我的排位 {{ candidateQueueItem(msg.task.job_id, video)?.queue_runtime?.user_position }}
+                                  </span>
+                                  <span
+                                    v-if="candidateQueueItem(msg.task.job_id, video)?.queue_runtime?.global_position"
+                                    class="opacity-75"
+                                  >
+                                    全局排位 {{ candidateQueueItem(msg.task.job_id, video)?.queue_runtime?.global_position }}
+                                  </span>
                                 </div>
                               </div>
                             </div>
@@ -195,27 +293,18 @@
                                 <n-button
                                   size="tiny"
                                   type="primary"
-                                  ghost
-                                  @click="openVideoUrl(video)"
-                                  :disabled="!String(video.url || '').trim()"
-                                >
-                                  打开B站
-                                </n-button>
-                                <n-button
-                                  size="tiny"
-                                  type="primary"
                                   @click="selectCandidateVideo(msg.task.job_id, video)"
                                   :loading="isSelectingCandidateVideo(msg.task.job_id, video)"
                                   :disabled="!String(video.url || '').trim() || !chatSessionUuid"
                                 >
-                                  选择并处理
+                                  总结笔记
                                 </n-button>
                               </n-space>
                             </div>
 
                             <div
                               v-if="activeVideoPreviewKey(msg.task.job_id) === videoPreviewKey(video) && videoEmbedUrl(video)"
-                              class="mt-3 overflow-hidden rounded-lg border border-slate-200/80 dark:border-slate-700/50"
+                              class="mt-3 overflow-hidden rounded-lg ai-candidate-preview"
                             >
                               <iframe
                                 :src="videoEmbedUrl(video) || undefined"
@@ -338,6 +427,54 @@
                 </div>
               </div>
 
+              <div
+                v-if="currentQueueBatch || currentQueueRuntime"
+                class="rail-section rail-section--plain"
+              >
+                <div class="text-xs opacity-70 mb-2">当前队列状态</div>
+                <div class="grid grid-cols-2 gap-2 text-xs">
+                  <div class="rail-subpanel p-2">
+                    <div class="opacity-60">你的队列</div>
+                    <div class="font-medium">
+                      {{ currentQueueBatch?.user_pending_count ?? currentQueueRuntime?.user_pending_count ?? 0 }}
+                    </div>
+                  </div>
+                  <div class="rail-subpanel p-2">
+                    <div class="opacity-60">全局队列</div>
+                    <div class="font-medium">
+                      {{ currentQueueBatch?.global_pending_count ?? currentQueueRuntime?.global_pending_count ?? 0 }}
+                    </div>
+                  </div>
+                  <div class="rail-subpanel p-2">
+                    <div class="opacity-60">我的排位</div>
+                    <div class="font-medium">
+                      {{ currentQueueRuntime?.user_position ?? '--' }}
+                    </div>
+                  </div>
+                  <div class="rail-subpanel p-2">
+                    <div class="opacity-60">全局排位</div>
+                    <div class="font-medium">
+                      {{ currentQueueRuntime?.global_position ?? '--' }}
+                    </div>
+                  </div>
+                </div>
+                <div v-if="currentQueueBatch?.current_processing_item?.title" class="text-xs mt-2">
+                  <span class="opacity-70">正在处理：</span>
+                  <span class="font-medium">{{ currentQueueBatch?.current_processing_item?.title }}</span>
+                </div>
+                <div v-if="currentQueueBatchCompletedItems.length" class="mt-2 space-y-2">
+                  <div class="text-xs opacity-70">已完成视频笔记（可先看）</div>
+                  <div
+                    v-for="(doneItem, idx) in currentQueueBatchCompletedItems.slice(-3)"
+                    :key="`${doneItem.child_job_id || idx}`"
+                    class="rail-subpanel p-2"
+                  >
+                    <div class="text-xs font-medium mb-1">{{ doneItem.title || `视频 ${idx + 1}` }}</div>
+                    <pre class="text-[11px] leading-5 whitespace-pre-wrap break-words font-sans">{{ String(doneItem.note_preview || '').slice(0, 260) }}</pre>
+                  </div>
+                </div>
+              </div>
+
               <div class="rail-section rail-section--plain">
                 <div class="flex items-center justify-between gap-2 mb-2">
                   <div class="text-xs opacity-70">任务日志（最近）</div>
@@ -391,8 +528,13 @@
                 </div>
 
                 <div class="rail-subpanel p-2 max-h-[180px] overflow-auto">
-                  <template v-if="currentNoteTextPreview">
-                    <pre class="text-xs leading-5 whitespace-pre-wrap break-words font-sans">{{ currentNoteTextPreview }}</pre>
+                  <template v-if="currentNoteText">
+                    <div class="text-[11px] opacity-60 mb-2">
+                      已加载完整 Markdown。任务完成后会自动以 AI 消息形式加入当前对话。
+                    </div>
+                    <div class="rail-md-preview">
+                      <MarkdownContent :source="currentNoteText" />
+                    </div>
                   </template>
                   <div v-else class="text-xs opacity-60 py-2">
                     {{ isCurrentJobCompleted ? '任务已完成，点击“加载 MD”查看内容。' : '任务完成后可在这里预览并下载 Markdown 笔记。' }}
@@ -419,9 +561,18 @@ import { useJobsStore } from '@/stores/modules/useJobsStore'
 import { useChatStore } from '@/stores/modules/useChatStore'
 import { useAuthStore } from '@/stores/modules/useAuthStore'
 import { useGlobalStore } from '@/stores/global-store'
-import { createChatSessionApi, listChatMessagesApi, listChatModelsApi, selectChatCandidateVideoApi, sendChatMessageStreamApi } from '@/api/chat'
+import {
+  createChatSessionApi,
+  listChatMessagesApi,
+  listChatModelsApi,
+  saveChatJobNoteMessageApi,
+  selectChatCandidateVideoApi,
+  selectChatCandidateVideosBatchApi,
+  sendChatMessageStreamApi,
+} from '@/api/chat'
 import { buildJobNoteDownloadUrl } from '@/api/jobs'
-import type { ChatMessage, ChatModelItem, JobCreateResponse, TopicSelectedVideo } from '@/api/types'
+import type { ChatMessage, ChatModelItem, JobCreateResponse, TopicQueueBatchSummary, TopicSelectedVideo } from '@/api/types'
+import MarkdownContent from '@/components/MarkdownContent.vue'
 
 type UiChatMessage = {
   localId: string
@@ -434,6 +585,9 @@ type UiChatMessage = {
   knowledgeLookupUsed?: boolean
   knowledgeLookupReason?: string
   knowledgeHits?: Array<Record<string, any>>
+  renderAsMarkdown?: boolean
+  markdownLabel?: string
+  jobNoteJobId?: string
 }
 
 const router = useRouter()
@@ -460,11 +614,14 @@ const loadingSessionMessages = ref(false)
 const skipNextRouteSessionHydrateUuid = ref('')
 const videoPreviewState = ref<Record<string, string>>({})
 const selectingVideoState = ref<Record<string, boolean>>({})
+const candidateSelectionState = ref<Record<string, Record<string, boolean>>>({})
+const batchSelectingJobs = ref<Record<string, boolean>>({})
 
 const currentJobState = computed(() => (jobsStore.currentJobId ? jobsStore.jobs[jobsStore.currentJobId] : null))
 const currentSnapshot = computed(() => currentJobState.value?.snapshot || null)
 const currentUserLabel = computed(() => authStore.user?.display_name || authStore.user?.username || '你')
 const loadingCurrentJobNote = ref(false)
+const syncingJobNoteMessageByJobId = ref<Record<string, boolean>>({})
 
 const currentSseButtonText = computed(() => {
   const s = currentJobState.value?.sseStatus
@@ -514,11 +671,13 @@ const currentSidebarLogs = computed(() => {
 const isCurrentJobCompleted = computed(() => currentSnapshot.value?.status === 'completed')
 const currentNoteText = computed(() => currentJobState.value?.noteText || '')
 const currentNoteLink = computed(() => currentJobState.value?.noteLink || null)
-const currentNoteTextPreview = computed(() => (currentNoteText.value || '').slice(0, 4000))
 const currentNoteDownloadUrl = computed(() => {
   if (!jobsStore.currentJobId || !currentNoteLink.value) return ''
   return buildJobNoteDownloadUrl(jobsStore.currentJobId)
 })
+const currentQueueRuntime = computed(() => ((currentSnapshot.value?.result as any)?.queue_runtime || null) as Record<string, any> | null)
+const currentQueueBatch = computed(() => ((currentSnapshot.value?.result as any)?.queue_batch || null) as TopicQueueBatchSummary | null)
+const currentQueueBatchCompletedItems = computed(() => Array.isArray(currentQueueBatch.value?.completed_items) ? currentQueueBatch.value!.completed_items! : [])
 
 onMounted(async () => {
   globalStore.setBreadcrumbBarVisible(false)
@@ -568,7 +727,6 @@ watch(
   () => [jobsStore.currentJobId, currentSnapshot.value?.status] as const,
   async ([jobId, status]) => {
     if (!jobId || status !== 'completed') return
-    if (currentNoteText.value && currentNoteLink.value) return
     await loadCurrentJobNoteAssets({ silent: true })
   },
 )
@@ -618,6 +776,8 @@ function startNewConversation() {
   userInput.value = ''
   knowledgeRetrievalEnabled.value = false
   videoPreviewState.value = {}
+  candidateSelectionState.value = {}
+  batchSelectingJobs.value = {}
 }
 
 function resetCurrentTaskState() {
@@ -665,6 +825,13 @@ async function loadSessionFromRoute(sessionUuidFromRoute: string) {
       knowledgeLookupUsed: Boolean(m.meta?.knowledge_lookup?.used),
       knowledgeLookupReason: String(m.meta?.knowledge_lookup?.reason || '').trim() || undefined,
       knowledgeHits: Array.isArray(m.meta?.knowledge_hits) ? (m.meta?.knowledge_hits as Array<Record<string, any>>) : [],
+      renderAsMarkdown: Boolean(m.meta?.render_markdown) || String(m.meta?.message_kind || '') === 'job_markdown',
+      markdownLabel: String((m.meta as any)?.job_note?.file_name || '').trim()
+        ? `Markdown 结果 · ${String((m.meta as any)?.job_note?.file_name || '').trim()}`
+        : (Boolean(m.meta?.render_markdown) || String(m.meta?.message_kind || '') === 'job_markdown')
+          ? 'Markdown 结果'
+          : undefined,
+      jobNoteJobId: String((m.meta as any)?.job_note?.job_id || '').trim() || undefined,
     }))
     messages.value = loaded
 
@@ -681,7 +848,7 @@ async function loadSessionFromRoute(sessionUuidFromRoute: string) {
       jobsStore.setCurrentJob(latestTaskJobId)
       try {
         const snap = await jobsStore.fetchJob(latestTaskJobId)
-        if (snap?.status === 'running' || snap?.status === 'queued') {
+        if (snap?.status === 'running' || snap?.status === 'queued' || snap?.status === 'waiting_user_pick') {
           jobsStore.connectJobEvents(latestTaskJobId)
         }
       } catch {
@@ -709,6 +876,9 @@ function appendUiMessage(payload: Partial<UiChatMessage> & Pick<UiChatMessage, '
     knowledgeLookupUsed: payload.knowledgeLookupUsed,
     knowledgeLookupReason: payload.knowledgeLookupReason,
     knowledgeHits: Array.isArray(payload.knowledgeHits) ? payload.knowledgeHits : [],
+    renderAsMarkdown: payload.renderAsMarkdown,
+    markdownLabel: payload.markdownLabel,
+    jobNoteJobId: payload.jobNoteJobId,
   }
   messages.value.push(item)
   const last = messages.value[messages.value.length - 1]
@@ -716,6 +886,9 @@ function appendUiMessage(payload: Partial<UiChatMessage> & Pick<UiChatMessage, '
 }
 
 function mapAssistantMessage(msg: ChatMessage, task: JobCreateResponse | null, toolDecision?: { reason?: string }) {
+  const isMarkdownMessage = Boolean(msg?.meta?.render_markdown) || String(msg?.meta?.message_kind || '') === 'job_markdown'
+  const jobNoteJobId = String((msg?.meta as any)?.job_note?.job_id || '').trim() || undefined
+  const jobNoteFileName = String((msg?.meta as any)?.job_note?.file_name || '').trim()
   return appendUiMessage({
     role: 'assistant',
     content: String(msg?.content || '我已收到。'),
@@ -726,6 +899,9 @@ function mapAssistantMessage(msg: ChatMessage, task: JobCreateResponse | null, t
     knowledgeLookupUsed: Boolean(msg?.meta?.knowledge_lookup?.used),
     knowledgeLookupReason: String(msg?.meta?.knowledge_lookup?.reason || '').trim() || undefined,
     knowledgeHits: Array.isArray(msg?.meta?.knowledge_hits) ? (msg?.meta?.knowledge_hits as Array<Record<string, any>>) : [],
+    renderAsMarkdown: isMarkdownMessage,
+    markdownLabel: isMarkdownMessage ? (jobNoteFileName ? `Markdown 结果 · ${jobNoteFileName}` : 'Markdown 结果') : undefined,
+    jobNoteJobId,
   })
 }
 
@@ -933,6 +1109,24 @@ function jobVideoCandidates(jobId: string): TopicSelectedVideo[] {
   return Array.isArray(items) ? (items as TopicSelectedVideo[]) : []
 }
 
+function jobQueueBatch(jobId: string): TopicQueueBatchSummary | null {
+  const result = jobsStore.jobs[jobId]?.snapshot?.result as any
+  const qb = result?.queue_batch
+  return qb && typeof qb === 'object' ? (qb as TopicQueueBatchSummary) : null
+}
+
+function jobQueueCompletedItems(jobId: string) {
+  const qb = jobQueueBatch(jobId)
+  return Array.isArray(qb?.completed_items) ? qb!.completed_items! : []
+}
+
+function candidateQueueItem(jobId: string, video: TopicSelectedVideo) {
+  const qb = jobQueueBatch(jobId)
+  const items = Array.isArray(qb?.items) ? qb!.items! : []
+  const url = String(video.url || '').trim()
+  return (items.find((x) => String((x as any)?.bili_url || '') === url) || null) as any
+}
+
 function isTopicTask(jobId: string) {
   const kind = String(jobsStore.jobs[jobId]?.snapshot?.kind || '')
   return kind === 'topic'
@@ -985,10 +1179,57 @@ function openKnowledgeHitSource(hit: Record<string, any>) {
 }
 
 function videoCoverUrl(video: TopicSelectedVideo) {
-  const raw = String((video as any).cover || '').trim()
+  const raw = String((video as any).cover || (video as any).pic || (video as any).cover_url || (video as any).thumbnail || '').trim()
   if (!raw) return ''
+  if (raw.startsWith('/')) return `https://i0.hdslb.com${raw}`
   if (raw.startsWith('//')) return `https:${raw}`
+  if (raw.startsWith('http://')) return raw.replace(/^http:\/\//i, 'https://')
   return raw
+}
+
+function looksLikeStatsOnlyTitle(text: string) {
+  const t = String(text || '').trim()
+  if (!t) return true
+  if (t.length > 48) return false
+  return /^[0-9.\s:万亿wWkK+]+$/.test(t)
+}
+
+function candidateDisplayTitle(video: TopicSelectedVideo, idx: number) {
+  const title = String(video.title || '').trim()
+  if (title && !looksLikeStatsOnlyTitle(title)) return title
+  const keyword = String((video as any).from_keyword || '').trim()
+  return keyword ? `候选视频 ${idx + 1}（${keyword}）` : `候选视频 ${idx + 1}`
+}
+
+function candidateStatItems(video: TopicSelectedVideo) {
+  const raw = String((video as any).stats || '').trim()
+  if (!raw) return [] as Array<{ label: string; value: string }>
+  if (/(播放|弹幕|点赞|评论|收藏)/.test(raw)) {
+    return [{ label: '数据', value: raw }]
+  }
+  const duration = String(video.duration || '').trim()
+  const tokens = raw
+    .replace(/[|｜·•]/g, ' ')
+    .split(/\s+/)
+    .map((x) => x.trim())
+    .filter(Boolean)
+    .filter((x) => x !== duration)
+  if (!tokens.length) return []
+  const labels = ['播放', '弹幕', '点赞', '评论', '收藏']
+  return tokens.slice(0, labels.length).map((value, i) => ({
+    label: labels[i] || `数据${i + 1}`,
+    value,
+  }))
+}
+
+function candidateQueueStatusLabel(status?: string) {
+  const s = String(status || '')
+  if (s === 'waiting_user_pick') return '待选择'
+  if (s === 'queued') return '排队中'
+  if (s === 'running') return '处理中'
+  if (s === 'completed') return '已完成'
+  if (s === 'failed') return '失败'
+  return s || ''
 }
 
 function candidateSelectKey(jobId: string, video: TopicSelectedVideo) {
@@ -997,6 +1238,112 @@ function candidateSelectKey(jobId: string, video: TopicSelectedVideo) {
 
 function isSelectingCandidateVideo(jobId: string, video: TopicSelectedVideo) {
   return Boolean(selectingVideoState.value[candidateSelectKey(jobId, video)])
+}
+
+function selectedCandidateMap(jobId: string) {
+  return candidateSelectionState.value[jobId] || {}
+}
+
+function isCandidateSelected(jobId: string, video: TopicSelectedVideo) {
+  return Boolean(selectedCandidateMap(jobId)[candidateSelectKey(jobId, video)])
+}
+
+function toggleCandidateSelected(jobId: string, video: TopicSelectedVideo) {
+  const key = candidateSelectKey(jobId, video)
+  const next = { ...selectedCandidateMap(jobId) }
+  next[key] = !next[key]
+  if (!next[key]) delete next[key]
+  candidateSelectionState.value = { ...candidateSelectionState.value, [jobId]: next }
+}
+
+function clearSelectedCandidates(jobId: string) {
+  const next = { ...candidateSelectionState.value }
+  delete next[jobId]
+  candidateSelectionState.value = next
+}
+
+function selectAllCandidates(jobId: string) {
+  const all = jobVideoCandidates(jobId)
+  const next: Record<string, boolean> = {}
+  for (const v of all) {
+    const key = candidateSelectKey(jobId, v)
+    if (key) next[key] = true
+  }
+  candidateSelectionState.value = { ...candidateSelectionState.value, [jobId]: next }
+}
+
+function selectedCandidates(jobId: string) {
+  return jobVideoCandidates(jobId).filter((v) => isCandidateSelected(jobId, v))
+}
+
+function selectedCandidateCount(jobId: string) {
+  return selectedCandidates(jobId).length
+}
+
+function isBatchSelecting(jobId: string) {
+  return Boolean(batchSelectingJobs.value[jobId])
+}
+
+function applyQueueBatchToJobSnapshot(jobId: string, queueBatch: TopicQueueBatchSummary | null | undefined) {
+  if (!queueBatch) return
+  const jobUi = jobsStore.jobs[jobId]
+  const snap = jobUi?.snapshot
+  if (!snap) return
+  const prevResult = (snap.result as Record<string, any> | null) || {}
+  jobUi.snapshot = {
+    ...snap,
+    result: {
+      ...prevResult,
+      queue_batch: queueBatch as any,
+      video_runs: (queueBatch.items as any) || prevResult.video_runs,
+    } as any,
+  }
+}
+
+async function selectCandidateVideosBatch(parentJobId: string) {
+  const sessionUuid = String(chatSessionUuid.value || '').trim()
+  if (!sessionUuid) {
+    message.warning('当前会话不存在，无法提交选择')
+    return
+  }
+  const picked = selectedCandidates(parentJobId)
+  if (!picked.length) {
+    message.warning('请先选择至少一个候选视频')
+    return
+  }
+  if (batchSelectingJobs.value[parentJobId]) return
+  batchSelectingJobs.value = { ...batchSelectingJobs.value, [parentJobId]: true }
+  try {
+    const res = await selectChatCandidateVideosBatchApi(sessionUuid, parentJobId, {
+      video_indexes: picked
+        .map((v) => (typeof v.index === 'number' ? v.index : undefined))
+        .filter((x): x is number => typeof x === 'number'),
+      video_urls: picked.map((v) => String(v.url || '').trim()).filter(Boolean),
+    })
+    applyQueueBatchToJobSnapshot(parentJobId, res.queue_batch || null)
+    for (const t of res.enqueued_tasks || []) {
+      if (t?.job_id) chatStore.bindJobToSession(String(t.job_id), sessionUuid)
+    }
+    const savedMsg = (res.assistant_message || null) as ChatMessage | null
+    if (savedMsg) {
+      mapAssistantMessage(savedMsg, (savedMsg.meta?.task as JobCreateResponse | null) ?? null, (savedMsg.meta?.tool_decision as any) || undefined)
+    }
+    jobsStore.setCurrentJob(parentJobId)
+    try {
+      await jobsStore.fetchJob(parentJobId)
+    } catch {
+      // ignore
+    }
+    jobsStore.connectJobEvents(parentJobId)
+    clearSelectedCandidates(parentJobId)
+    message.success(`已加入任务队列：${(res.enqueued_tasks || []).length || picked.length} 个视频`)
+  } catch (e: any) {
+    message.error(e?.message || '批量加入队列失败')
+  } finally {
+    const next = { ...batchSelectingJobs.value }
+    delete next[parentJobId]
+    batchSelectingJobs.value = next
+  }
 }
 
 async function selectCandidateVideo(parentJobId: string, video: TopicSelectedVideo) {
@@ -1019,6 +1366,7 @@ async function selectCandidateVideo(parentJobId: string, video: TopicSelectedVid
       video_url: url,
     })
     const task = res.task || null
+    applyQueueBatchToJobSnapshot(parentJobId, res.queue_batch || null)
     const savedMsg = (res.assistant_message || null) as ChatMessage | null
     if (savedMsg) {
       const uiMsg = mapAssistantMessage(savedMsg, task, (savedMsg.meta?.tool_decision as any) || undefined)
@@ -1033,19 +1381,19 @@ async function selectCandidateVideo(parentJobId: string, video: TopicSelectedVid
     }
     if (task?.job_id) {
       chatStore.bindJobToSession(task.job_id, sessionUuid)
-      jobsStore.setCurrentJob(task.job_id)
+      jobsStore.setCurrentJob(parentJobId)
       knowledgeRetrievalEnabled.value = true
       try {
-        await jobsStore.fetchJob(task.job_id)
+        await jobsStore.fetchJob(parentJobId)
       } catch {
         // ignore
       }
-      jobsStore.connectJobEvents(task.job_id)
+      jobsStore.connectJobEvents(parentJobId)
     }
     await nextTick()
     const el = messagesContainerRef.value
     if (el) el.scrollTop = el.scrollHeight
-    message.success('已创建所选视频处理任务')
+    message.success('已加入任务队列，开始总结该视频笔记')
   } catch (e: any) {
     message.error(e?.message || '选择视频处理失败')
   } finally {
@@ -1071,11 +1419,50 @@ async function loadCurrentJobNoteAssets(options?: { silent?: boolean }) {
     if (!currentNoteText.value) {
       await jobsStore.fetchNote(jobId)
     }
+    await syncCurrentJobNoteIntoChatIfNeeded(jobId)
     if (!options?.silent) message.success('已加载 Markdown 结果')
   } catch (e: any) {
     if (!options?.silent) message.error(e?.message || '加载 Markdown 失败')
   } finally {
     loadingCurrentJobNote.value = false
+  }
+}
+
+function hasJobNoteMessageInCurrentChat(jobId: string) {
+  const target = String(jobId || '').trim()
+  if (!target) return false
+  return messages.value.some((m) => String(m.jobNoteJobId || '').trim() === target)
+}
+
+async function syncCurrentJobNoteIntoChatIfNeeded(jobIdInput?: string) {
+  const jobId = String(jobIdInput || jobsStore.currentJobId || '').trim()
+  if (!jobId) return
+  const sessionUuid = String(chatSessionUuid.value || chatStore.getJobSourceSession(jobId) || '').trim()
+  if (!sessionUuid) return
+  const md = String(currentNoteText.value || '').trim()
+  if (!md) return
+  if (hasJobNoteMessageInCurrentChat(jobId)) return
+  if (syncingJobNoteMessageByJobId.value[jobId]) return
+
+  syncingJobNoteMessageByJobId.value = { ...syncingJobNoteMessageByJobId.value, [jobId]: true }
+  try {
+    const res = await saveChatJobNoteMessageApi(sessionUuid, jobId, {
+      markdown_text: md,
+      file_name: String(currentNoteLink.value?.file_name || ''),
+    })
+    const savedMsg = (res.assistant_message || null) as ChatMessage | null
+    if (savedMsg && !hasJobNoteMessageInCurrentChat(jobId)) {
+      mapAssistantMessage(savedMsg, (savedMsg.meta?.task as JobCreateResponse | null) ?? null, (savedMsg.meta?.tool_decision as any) || undefined)
+      await nextTick()
+      const el = messagesContainerRef.value
+      if (el) el.scrollTop = el.scrollHeight
+    }
+  } catch {
+    // 不打断主流程：任务已完成，聊天同步失败可稍后重试/刷新恢复
+  } finally {
+    const nextState = { ...syncingJobNoteMessageByJobId.value }
+    delete nextState[jobId]
+    syncingJobNoteMessageByJobId.value = nextState
   }
 }
 
@@ -1089,6 +1476,7 @@ function tagType(status?: string) {
   if (status === 'failed') return 'error'
   if (status === 'running') return 'success'
   if (status === 'queued') return 'info'
+  if (status === 'waiting_user_pick') return 'warning'
   return 'default'
 }
 
@@ -1097,6 +1485,7 @@ function statusLabel(status?: string) {
   if (status === 'failed') return '失败'
   if (status === 'running') return '运行中'
   if (status === 'queued') return '排队中'
+  if (status === 'waiting_user_pick') return '等待选择视频'
   return status || '未开始'
 }
 
@@ -1104,6 +1493,9 @@ function humanizeStage(stage: string) {
   const s = (stage || '').trim()
   if (!s) return ''
   if (s.includes('search_round_')) return 'AI 正在检索并筛选视频'
+  if (s === 'waiting_user_pick') return '等待你选择要总结的视频'
+  if (s === 'queue_waiting') return '已加入全局队列，等待处理'
+  if (s === 'queue_waiting_children') return '已加入队列，等待逐个处理视频'
   if (s === 'run_selected_video_pipelines') return '正在处理选中的视频'
   if (s === 'merge_multi_notes') return 'AI 正在合并多份笔记'
   if (s === 'extract_audio_url') return '正在提取音频链接'
@@ -1395,6 +1787,33 @@ function humanizeSidebarLog(text: string) {
   border: 1px solid transparent;
 }
 
+.message-bubble--markdown {
+  white-space: normal;
+  overflow: hidden;
+}
+
+.message-bubble--markdown :deep(.md-content) {
+  font-size: 0.92rem;
+}
+
+.rail-md-preview :deep(.md-content) {
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
+.rail-md-preview :deep(.md-content h1) {
+  font-size: 0.9rem;
+}
+
+.rail-md-preview :deep(.md-content h2) {
+  font-size: 0.84rem;
+}
+
+.rail-md-preview :deep(.md-content h3),
+.rail-md-preview :deep(.md-content h4) {
+  font-size: 0.8rem;
+}
+
 .message-pending,
 .message-pending * {
   cursor: default !important;
@@ -1454,6 +1873,63 @@ function humanizeSidebarLog(text: string) {
   box-shadow: 0 6px 18px rgba(15, 23, 42, 0.06);
 }
 
+.ai-candidate-panel {
+  background: rgba(248, 250, 252, 0.95);
+  border: 1px solid rgba(203, 213, 225, 0.65);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65), 0 6px 18px rgba(15, 23, 42, 0.05);
+}
+
+.ai-candidate-panel__title {
+  color: rgba(51, 65, 85, 0.82);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.ai-candidate-card {
+  border: 1px solid rgba(203, 213, 225, 0.78);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.9) 0%, rgba(248, 250, 252, 0.85) 100%);
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.05);
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+}
+
+.ai-candidate-card:hover {
+  border-color: rgba(148, 163, 184, 0.55);
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.08);
+}
+
+.ai-candidate-cover {
+  border: 1px solid rgba(203, 213, 225, 0.72);
+  background: rgba(241, 245, 249, 0.9);
+}
+
+.ai-candidate-card__title {
+  color: #0f172a;
+}
+
+.ai-candidate-card__meta {
+  color: rgba(71, 85, 105, 0.95);
+}
+
+.ai-candidate-chip {
+  border: 1px solid rgba(203, 213, 225, 0.9);
+  background: rgba(255, 255, 255, 0.78);
+  color: rgba(71, 85, 105, 0.96);
+}
+
+.ai-candidate-card__reason {
+  color: rgba(51, 65, 85, 0.84);
+}
+
+.ai-candidate-card__keyword {
+  color: rgba(71, 85, 105, 0.7);
+}
+
+.ai-candidate-preview {
+  border: 1px solid rgba(203, 213, 225, 0.78);
+  background: rgba(255, 255, 255, 0.4);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55);
+}
+
 .message-user {
   background: #fff;
   border-color: rgba(203, 213, 225, 0.9);
@@ -1464,6 +1940,60 @@ function humanizeSidebarLog(text: string) {
   background: rgba(31, 41, 55, 0.92);
   border-color: rgba(75, 85, 99, 0.9);
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.28);
+}
+
+:global(.dark) .ai-candidate-panel {
+  background: rgba(31, 41, 55, 0.92);
+  border: 1px solid rgba(75, 85, 99, 0.9);
+  box-shadow: inset 0 1px 0 rgba(148, 163, 184, 0.05), 0 8px 20px rgba(0, 0, 0, 0.24);
+}
+
+:global(.dark) .ai-candidate-panel__title {
+  color: rgba(226, 232, 240, 0.86);
+}
+
+:global(.dark) .ai-candidate-card {
+  border: 1px solid rgba(75, 85, 99, 0.72);
+  background: linear-gradient(180deg, rgba(17, 24, 39, 0.5) 0%, rgba(30, 41, 59, 0.5) 100%);
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.22);
+}
+
+:global(.dark) .ai-candidate-card:hover {
+  border-color: rgba(148, 163, 184, 0.35);
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.28);
+}
+
+:global(.dark) .ai-candidate-cover {
+  border-color: rgba(75, 85, 99, 0.72);
+  background: rgba(15, 23, 42, 0.52);
+}
+
+:global(.dark) .ai-candidate-card__title {
+  color: rgba(241, 245, 249, 0.97);
+}
+
+:global(.dark) .ai-candidate-card__meta {
+  color: rgba(203, 213, 225, 0.9);
+}
+
+:global(.dark) .ai-candidate-chip {
+  border-color: rgba(75, 85, 99, 0.82);
+  background: rgba(30, 41, 59, 0.65);
+  color: rgba(226, 232, 240, 0.92);
+}
+
+:global(.dark) .ai-candidate-card__reason {
+  color: rgba(226, 232, 240, 0.8);
+}
+
+:global(.dark) .ai-candidate-card__keyword {
+  color: rgba(203, 213, 225, 0.66);
+}
+
+:global(.dark) .ai-candidate-preview {
+  border-color: rgba(75, 85, 99, 0.72);
+  background: rgba(15, 23, 42, 0.35);
+  box-shadow: inset 0 1px 0 rgba(148, 163, 184, 0.04);
 }
 
 :global(.dark) .message-user {

@@ -142,6 +142,9 @@
                   <div><strong>说明：</strong>{{ displayDetail }}</div>
                   <div v-if="videoRuns.length"><strong>已处理视频：</strong>{{ videoRuns.length }} 个</div>
                   <div v-if="reusedVideoRuns.length"><strong>复用知识：</strong>{{ reusedVideoRuns.length }} 个视频</div>
+                  <div v-if="topicQueueBatch"><strong>你的队列：</strong>{{ topicQueueBatch.user_pending_count ?? 0 }}</div>
+                  <div v-if="topicQueueBatch"><strong>全局队列：</strong>{{ topicQueueBatch.global_pending_count ?? 0 }}</div>
+                  <div v-if="topicQueueBatch?.current_processing_item?.title"><strong>当前处理：</strong>{{ topicQueueBatch.current_processing_item.title }}</div>
                   <div v-if="noteLink"><strong>结果文件：</strong>{{ noteLink.file_name }}</div>
                 </n-space>
               </n-tab-pane>
@@ -231,13 +234,18 @@
           路径：{{ noteLink.abs_path }}
         </div>
 
-        <n-input
-          v-model:value="noteTextLocal"
-          type="textarea"
-          readonly
-          placeholder="任务完成后点击“加载笔记”查看内容"
-          :autosize="{ minRows: 16, maxRows: 36 }"
-        />
+        <div
+          v-if="noteTextLocal"
+          class="rounded-xl border border-slate-200/80 dark:border-slate-700/60 bg-white/80 dark:bg-slate-900/35 p-4 max-h-[70vh] overflow-auto"
+        >
+          <MarkdownContent :source="noteTextLocal" />
+        </div>
+        <div
+          v-else
+          class="rounded-xl border border-dashed border-slate-300/80 dark:border-slate-700/80 p-6 text-sm opacity-70"
+        >
+          任务完成后点击“加载笔记”查看内容（支持前端 Markdown 渲染）。
+        </div>
       </n-card>
     </n-space>
   </div>
@@ -254,7 +262,6 @@ import {
   NEmpty,
   NGi,
   NGrid,
-  NInput,
   NList,
   NListItem,
   NSpace,
@@ -268,6 +275,7 @@ import { useJobsStore } from '@/stores/modules/useJobsStore'
 import { useChatStore } from '@/stores/modules/useChatStore'
 import { buildJobNoteDownloadUrl } from '@/api/jobs'
 import { getApiBaseUrl } from '@/api/client'
+import MarkdownContent from '@/components/MarkdownContent.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -290,6 +298,10 @@ const videoRuns = computed(() => {
   return Array.isArray(result?.video_runs) ? result.video_runs : []
 })
 const jobResult = computed(() => (job.value?.result as any) || {})
+const topicQueueBatch = computed(() => {
+  const qb = jobResult.value?.queue_batch
+  return qb && typeof qb === 'object' ? qb : null
+})
 const singleJobKnowledgeReused = computed(
   () =>
     Boolean(jobResult.value?.knowledge_reused) ||
@@ -357,6 +369,7 @@ const statusFriendlyHint = computed(() => {
   const s = job.value?.status
   if (s === 'running') return '任务正在执行中，系统会持续更新进度'
   if (s === 'queued') return '任务已进入队列，马上开始'
+  if (s === 'waiting_user_pick') return 'AI 已筛出候选视频，等待你选择需要总结的视频后再继续'
   if (s === 'completed') return '任务已完成，可以查看并下载笔记'
   if (s === 'failed') return '任务中途失败，可根据提示检查配置后重试'
   return '等待任务状态更新'
@@ -472,6 +485,7 @@ function statusTagType(status?: string) {
   if (status === 'failed') return 'error'
   if (status === 'running') return 'success' // 用户要求：运行中显示绿色
   if (status === 'queued') return 'info'
+  if (status === 'waiting_user_pick') return 'warning'
   return 'default'
 }
 
@@ -480,6 +494,7 @@ function statusLabel(status?: string) {
   if (status === 'failed') return '失败'
   if (status === 'running') return '运行中'
   if (status === 'queued') return '排队中'
+  if (status === 'waiting_user_pick') return '等待选择视频'
   return status || '未知'
 }
 
@@ -493,6 +508,9 @@ function humanizeStage(stage: string) {
   const s = (stage || '').trim()
   if (!s) return '等待任务开始'
   if (s.includes('search_round_')) return 'AI 正在检索并评估候选视频'
+  if (s === 'waiting_user_pick') return '等待你选择要总结的视频'
+  if (s === 'queue_waiting') return '已加入全局队列，等待处理'
+  if (s === 'queue_waiting_children') return '已加入队列，等待逐个处理视频'
   if (s === 'run_selected_video_pipelines') return 'AI 正在逐个处理已选视频'
   if (s === 'merge_multi_notes') return 'AI 正在合并多份中间笔记（归纳总结）'
   if (s === 'extract_audio_url') return '正在提取音频链接'
