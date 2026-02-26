@@ -11,23 +11,23 @@
       <!-- 顶部条，仅展开时显示 -->
       <div
         :class="{
-          'flex w-full items-center px-3 h-[30px] mt-2': true,
+          'flex w-full items-center justify-between px-3 h-10 mt-2': true,
         }"
         :style="!isHeaderVisible ? { borderColor: themeColors.sidebarBorder } : {}"
         v-show="!isSidebarMinimized"
       >
         <div
           @click="goHome"
-          class="flex cursor-pointer items-center justify-center w-[14px] h-[14px] flex-shrink-0"
+          class="flex cursor-pointer items-center justify-center w-8 h-8 rounded-[10px] flex-shrink-0 transition-colors"
           :style="{ color: themeColors.textSecondary }"
         >
-          <Icon icon="simple-icons:openai" width="14" height="14" />
+          <Icon icon="simple-icons:openai" width="16" height="16" />
         </div>
 
         <n-button
           text
           @click="toggleSidebar"
-          class="ml-auto transition-colors"
+          class="transition-colors !w-8 !h-8 !p-0 rounded-[10px]"
           :style="{ color: themeColors.textSecondary }"
           size="small"
         >

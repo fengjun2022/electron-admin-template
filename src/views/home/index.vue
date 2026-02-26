@@ -4,14 +4,16 @@
       <n-gi :span="18" class="h-full">
         <n-card :bordered="false" class="h-full">
           <div class="h-full flex flex-col">
-            <div class="px-2 pb-2 flex items-center justify-between gap-3">
-              <div class="text-sm opacity-80">对话模式</div>
-              <div class="flex items-center gap-2">
+            <div class="px-2 pb-2 grid grid-cols-[1fr_auto] items-center gap-3">
+              <div class="flex items-center">
+                <div class="text-sm opacity-80">对话模式</div>
+              </div>
+              <div class="flex items-center justify-end gap-2">
                 <span class="text-xs opacity-60">模型</span>
                 <n-select
                   v-model:value="selectedModel"
                   size="small"
-                  class="w-[280px]"
+                  style="width: 280px"
                   :options="modelOptions"
                   :loading="modelsLoading"
                   clearable
@@ -26,7 +28,7 @@
                   <div class="text-center max-w-xl px-6">
                     <div class="text-lg font-semibold mb-2">像 ChatGPT 一样先聊天，再决定是否创建任务</div>
                     <div class="text-sm opacity-70 leading-6">
-                      默认只回复对话内容，不会直接创建任务。开启“知识检索”后，AI 会先判断是否需要创建 B 站检索/转笔记任务，并且仍然会回复你。
+                      你可以先问功能、问概念、问思路。需要我去 B 站检索并整理笔记时，再打开“知识检索”发送即可。
                     </div>
                   </div>
                 </div>
@@ -100,10 +102,9 @@
                       知识检索
                     </button>
                     <span class="text-xs opacity-65">
-                      {{ knowledgeRetrievalEnabled ? '已开启：允许 AI 创建 B 站检索/转笔记任务' : '未开启：仅聊天回复，不创建任务' }}
+                      {{ knowledgeRetrievalEnabled ? '已开启：允许 AI 创建 B 站检索/转笔记任务（主题内容可直接用问句）' : '未开启：仅聊天回复，不创建任务' }}
                     </span>
                   </div>
-                  <n-button quaternary size="small" @click="startNewConversation">新对话</n-button>
                 </div>
 
                 <n-input
@@ -111,7 +112,7 @@
                   type="textarea"
                   :autosize="{ minRows: 3, maxRows: 8 }"
                   class="chat-composer-input"
-                  placeholder="先像聊天一样输入问题（如：你能帮我做什么 / 什么是LLM）。需要执行B站检索与转笔记时，再开启上方“知识检索”。"
+                  placeholder="先像聊天一样输入问题（如：你能帮我做什么 / 什么是LLM？）。需要执行B站检索与转笔记时，再开启上方“知识检索”（主题内容可直接用问句）。"
                   @keydown.enter.exact.prevent="handleEnterSend"
                 />
 
@@ -119,11 +120,18 @@
                   <div class="text-xs opacity-70">
                     Enter发送 · Shift+Enter换行 · 关闭“知识检索”时不会自动建任务
                   </div>
-                  <n-space>
+                  <n-space align="center">
                     <n-button @click="clearInput" quaternary>清空</n-button>
-                    <n-button type="primary" :loading="sending" @click="sendMessage">
-                      {{ knowledgeRetrievalEnabled ? '发送并判断是否创建任务' : '发送' }}
-                    </n-button>
+                    <button
+                      type="button"
+                      class="send-icon-btn"
+                      :disabled="(!userInput.trim() && !sending) || sending"
+                      title="发送"
+                      @click="sendMessage"
+                    >
+                      <span v-if="sending" class="send-icon-spinner" />
+                      <n-icon v-else :component="ArrowUpOutline" size="18" />
+                    </button>
                   </n-space>
                 </div>
               </div>
@@ -144,7 +152,7 @@
           </template>
 
           <template v-if="jobsStore.currentJobId">
-            <div class="space-y-3">
+            <div class="h-full flex flex-col gap-3">
               <div class="rounded-xl p-3 bg-blue-500/10 border border-blue-400/20">
                 <div class="text-xs opacity-70 mb-1">当前任务ID</div>
                 <div class="font-mono text-xs break-all">{{ jobsStore.currentJobId }}</div>
@@ -170,6 +178,68 @@
                   <span :class="currentSseColorClass">{{ currentSseLabel }}</span>
                 </div>
               </div>
+
+              <div class="rounded-xl p-3 border border-slate-200/70 dark:border-slate-700/70 bg-white/70 dark:bg-slate-900/40">
+                <div class="flex items-center justify-between gap-2 mb-2">
+                  <div class="text-xs opacity-70">任务日志（最近）</div>
+                  <n-tag size="small" type="default">{{ currentSidebarLogs.length }}</n-tag>
+                </div>
+                <div class="rounded-lg border border-slate-200/70 dark:border-slate-700/70 bg-white/80 dark:bg-black/20 p-2 max-h-[220px] overflow-auto">
+                  <template v-if="currentSidebarLogs.length">
+                    <div
+                      v-for="(log, idx) in currentSidebarLogs"
+                      :key="`${idx}-${log.ts || ''}`"
+                      class="py-1.5 border-b border-slate-200/50 dark:border-slate-700/40 last:border-b-0"
+                    >
+                      <div class="text-[11px] opacity-60">{{ log.ts || '--:--:--' }}</div>
+                      <div class="text-xs leading-5 whitespace-pre-wrap break-words">{{ log.message }}</div>
+                    </div>
+                  </template>
+                  <div v-else class="text-xs opacity-60 py-2">暂无日志，任务开始后会显示过程记录</div>
+                </div>
+              </div>
+
+              <div class="rounded-xl p-3 border border-slate-200/70 dark:border-slate-700/70 bg-white/70 dark:bg-slate-900/40">
+                <div class="flex items-center justify-between gap-2 mb-2">
+                  <div class="text-xs opacity-70">Markdown 结果</div>
+                  <n-tag size="small" :type="isCurrentJobCompleted ? 'success' : 'default'">
+                    {{ isCurrentJobCompleted ? '可查看' : '未完成' }}
+                  </n-tag>
+                </div>
+
+                <n-space size="small" class="mb-2">
+                  <n-button
+                    size="small"
+                    @click="loadCurrentJobNoteAssets"
+                    :disabled="!isCurrentJobCompleted || loadingCurrentJobNote"
+                    :loading="loadingCurrentJobNote"
+                  >
+                    加载 MD
+                  </n-button>
+                  <n-button
+                    size="small"
+                    tag="a"
+                    :href="currentNoteDownloadUrl || undefined"
+                    target="_blank"
+                    :disabled="!currentNoteDownloadUrl"
+                  >
+                    下载 MD
+                  </n-button>
+                </n-space>
+
+                <div v-if="currentNoteLink" class="text-[11px] opacity-60 mb-2 truncate" :title="currentNoteLink.file_name">
+                  {{ currentNoteLink.file_name }}
+                </div>
+
+                <div class="rounded-lg border border-slate-200/70 dark:border-slate-700/70 bg-white/80 dark:bg-black/20 p-2 max-h-[180px] overflow-auto">
+                  <template v-if="currentNoteTextPreview">
+                    <pre class="text-xs leading-5 whitespace-pre-wrap break-words font-sans">{{ currentNoteTextPreview }}</pre>
+                  </template>
+                  <div v-else class="text-xs opacity-60 py-2">
+                    {{ isCurrentJobCompleted ? '任务已完成，点击“加载 MD”查看内容。' : '任务完成后可在这里预览并下载 Markdown 笔记。' }}
+                  </div>
+                </div>
+              </div>
             </div>
           </template>
           <n-empty v-else description="先在中间聊天；开启“知识检索”并发送后，才可能创建任务" />
@@ -182,11 +252,13 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { NButton, NCard, NEmpty, NGi, NGrid, NInput, NSelect, NSpace, NTag, useMessage } from 'naive-ui'
+import { NButton, NCard, NEmpty, NGi, NGrid, NIcon, NInput, NSelect, NSpace, NTag, useMessage } from 'naive-ui'
+import { ArrowUpOutline } from '@vicons/ionicons5'
 import { useJobsStore } from '@/stores/modules/useJobsStore'
 import { useAuthStore } from '@/stores/modules/useAuthStore'
 import { useGlobalStore } from '@/stores/global-store'
 import { createChatSessionApi, listChatModelsApi, sendChatMessageApi } from '@/api/chat'
+import { buildJobNoteDownloadUrl } from '@/api/jobs'
 import type { ChatMessage, ChatModelItem, JobCreateResponse } from '@/api/types'
 
 type UiChatMessage = {
@@ -221,6 +293,7 @@ const routeNewChatToken = ref<string>('')
 const currentJobState = computed(() => (jobsStore.currentJobId ? jobsStore.jobs[jobsStore.currentJobId] : null))
 const currentSnapshot = computed(() => currentJobState.value?.snapshot || null)
 const currentUserLabel = computed(() => authStore.user?.display_name || authStore.user?.username || '你')
+const loadingCurrentJobNote = ref(false)
 
 const currentSseButtonText = computed(() => {
   const s = currentJobState.value?.sseStatus
@@ -249,6 +322,23 @@ const modelOptions = computed(() =>
     value: m.model_name,
   })),
 )
+
+const currentSidebarLogs = computed(() => {
+  const logs = currentJobState.value?.logs || []
+  return logs.slice(-40).map((x) => ({
+    ts: x.ts,
+    message: humanizeSidebarLog(x.message || ''),
+  }))
+})
+
+const isCurrentJobCompleted = computed(() => currentSnapshot.value?.status === 'completed')
+const currentNoteText = computed(() => currentJobState.value?.noteText || '')
+const currentNoteLink = computed(() => currentJobState.value?.noteLink || null)
+const currentNoteTextPreview = computed(() => (currentNoteText.value || '').slice(0, 4000))
+const currentNoteDownloadUrl = computed(() => {
+  if (!jobsStore.currentJobId || !currentNoteLink.value) return ''
+  return buildJobNoteDownloadUrl(jobsStore.currentJobId)
+})
 
 onMounted(async () => {
   globalStore.setBreadcrumbBarVisible(false)
@@ -283,6 +373,15 @@ watch(
     if (el) el.scrollTop = el.scrollHeight
   },
   { deep: true },
+)
+
+watch(
+  () => [jobsStore.currentJobId, currentSnapshot.value?.status] as const,
+  async ([jobId, status]) => {
+    if (!jobId || status !== 'completed') return
+    if (currentNoteText.value && currentNoteLink.value) return
+    await loadCurrentJobNoteAssets({ silent: true })
+  },
 )
 
 async function bootstrapCurrentJob() {
@@ -411,6 +510,9 @@ async function refreshCurrentJob() {
   if (!jobsStore.currentJobId) return
   try {
     await jobsStore.fetchJob(jobsStore.currentJobId)
+    if (currentSnapshot.value?.status === 'completed') {
+      await loadCurrentJobNoteAssets({ silent: true })
+    }
     message.success('已刷新当前任务')
   } catch (e: any) {
     message.error(e?.message || '刷新失败')
@@ -433,6 +535,26 @@ function openJob(id: string) {
 
 function clearInput() {
   userInput.value = ''
+}
+
+async function loadCurrentJobNoteAssets(options?: { silent?: boolean }) {
+  const jobId = jobsStore.currentJobId
+  if (!jobId || !isCurrentJobCompleted.value) return
+  if (loadingCurrentJobNote.value) return
+  loadingCurrentJobNote.value = true
+  try {
+    if (!currentNoteLink.value) {
+      await jobsStore.fetchNoteLink(jobId)
+    }
+    if (!currentNoteText.value) {
+      await jobsStore.fetchNote(jobId)
+    }
+    if (!options?.silent) message.success('已加载 Markdown 结果')
+  } catch (e: any) {
+    if (!options?.silent) message.error(e?.message || '加载 Markdown 失败')
+  } finally {
+    loadingCurrentJobNote.value = false
+  }
 }
 
 function handleEnterSend(e: KeyboardEvent) {
@@ -468,6 +590,13 @@ function humanizeStage(stage: string) {
   if (s === 'generate_note') return 'AI 正在生成笔记'
   if (s.includes('failed')) return '任务执行失败'
   return s
+}
+
+function humanizeSidebarLog(text: string) {
+  const t = (text || '').trim()
+  if (!t) return ''
+  if (t.includes('任务已创建')) return '任务已创建，等待执行'
+  return t
 }
 </script>
 
@@ -511,6 +640,54 @@ function humanizeStage(stage: string) {
   background: rgba(31, 41, 55, 0.95);
   color: #e5e7eb;
   border-color: rgba(148, 163, 184, 0.25);
+}
+
+.send-icon-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(203, 213, 225, 0.9);
+  background: #fff;
+  color: #0f172a;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+  transition: all 0.18s ease;
+}
+
+.send-icon-btn:hover:not(:disabled) {
+  border-color: rgba(59, 130, 246, 0.35);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
+  transform: translateY(-1px);
+}
+
+.send-icon-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+:global(.dark) .send-icon-btn {
+  background: rgba(17, 24, 39, 0.96);
+  color: #f8fafc;
+  border-color: rgba(107, 114, 128, 0.65);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.32);
+}
+
+.send-icon-spinner {
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  border: 2px solid rgba(148, 163, 184, 0.35);
+  border-top-color: currentColor;
+  animation: send-spin 0.8s linear infinite;
+}
+
+@keyframes send-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .message-bubble {
