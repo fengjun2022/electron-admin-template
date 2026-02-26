@@ -2,7 +2,7 @@
   <div class="p-2 h-full overflow-hidden">
     <n-grid :cols="24" x-gap="12" class="h-full">
       <n-gi :span="18" class="h-full">
-        <n-card :bordered="false" class="h-full">
+        <n-card :bordered="false" class="h-full right-rail-card">
           <div class="h-full flex flex-col">
             <div class="px-2 pb-2 grid grid-cols-[1fr_auto] items-center gap-3">
               <div class="flex items-center">
@@ -153,18 +153,18 @@
 
           <template v-if="jobsStore.currentJobId">
             <div class="h-full flex flex-col gap-3">
-              <div class="rounded-xl p-3 bg-blue-500/10 border border-blue-400/20">
+              <div class="rail-section rail-section--meta">
                 <div class="text-xs opacity-70 mb-1">当前任务ID</div>
                 <div class="font-mono text-xs break-all">{{ jobsStore.currentJobId }}</div>
               </div>
 
-              <div class="rounded-xl p-3 bg-green-500/10 border border-green-400/20">
+              <div class="rail-section rail-section--stage">
                 <div class="text-xs opacity-70 mb-1">正在进行的步骤</div>
                 <div class="font-medium">{{ humanizeStage(currentSnapshot?.stage || '') || '等待中' }}</div>
                 <div class="text-xs opacity-70 mt-1">{{ currentSnapshot?.detail || '系统将自动更新' }}</div>
               </div>
 
-              <div class="rounded-xl p-3 bg-red-500/10 border border-red-400/20">
+              <div class="rail-section rail-section--actions">
                 <div class="text-xs opacity-70 mb-1">快捷操作</div>
                 <n-space vertical>
                   <n-button block @click="refreshCurrentJob" :disabled="!jobsStore.currentJobId">刷新当前任务</n-button>
@@ -179,12 +179,12 @@
                 </div>
               </div>
 
-              <div class="rounded-xl p-3 border border-slate-200/70 dark:border-slate-700/70 bg-white/70 dark:bg-slate-900/40">
+              <div class="rail-section rail-section--plain">
                 <div class="flex items-center justify-between gap-2 mb-2">
                   <div class="text-xs opacity-70">任务日志（最近）</div>
                   <n-tag size="small" type="default">{{ currentSidebarLogs.length }}</n-tag>
                 </div>
-                <div class="rounded-lg border border-slate-200/70 dark:border-slate-700/70 bg-white/80 dark:bg-black/20 p-2 max-h-[220px] overflow-auto">
+                <div class="rail-subpanel p-2 max-h-[220px] overflow-auto">
                   <template v-if="currentSidebarLogs.length">
                     <div
                       v-for="(log, idx) in currentSidebarLogs"
@@ -199,7 +199,7 @@
                 </div>
               </div>
 
-              <div class="rounded-xl p-3 border border-slate-200/70 dark:border-slate-700/70 bg-white/70 dark:bg-slate-900/40">
+              <div class="rail-section rail-section--plain">
                 <div class="flex items-center justify-between gap-2 mb-2">
                   <div class="text-xs opacity-70">Markdown 结果</div>
                   <n-tag size="small" :type="isCurrentJobCompleted ? 'success' : 'default'">
@@ -210,7 +210,7 @@
                 <n-space size="small" class="mb-2">
                   <n-button
                     size="small"
-                    @click="loadCurrentJobNoteAssets"
+                    @click="() => loadCurrentJobNoteAssets()"
                     :disabled="!isCurrentJobCompleted || loadingCurrentJobNote"
                     :loading="loadingCurrentJobNote"
                   >
@@ -231,7 +231,7 @@
                   {{ currentNoteLink.file_name }}
                 </div>
 
-                <div class="rounded-lg border border-slate-200/70 dark:border-slate-700/70 bg-white/80 dark:bg-black/20 p-2 max-h-[180px] overflow-auto">
+                <div class="rail-subpanel p-2 max-h-[180px] overflow-auto">
                   <template v-if="currentNoteTextPreview">
                     <pre class="text-xs leading-5 whitespace-pre-wrap break-words font-sans">{{ currentNoteTextPreview }}</pre>
                   </template>
@@ -640,6 +640,86 @@ function humanizeSidebarLog(text: string) {
   background: rgba(31, 41, 55, 0.95);
   color: #e5e7eb;
   border-color: rgba(148, 163, 184, 0.25);
+}
+
+:deep(.right-rail-card > .n-card__content) {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.rail-section {
+  position: relative;
+  border-radius: 14px;
+  padding: 12px;
+  border: 1px solid rgba(203, 213, 225, 0.72);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(248, 250, 252, 0.86));
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.035);
+  --rail-accent: rgba(148, 163, 184, 0.45);
+}
+
+.rail-section::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  border-radius: 14px 0 0 14px;
+  background: var(--rail-accent);
+}
+
+.rail-section--meta {
+  --rail-accent: rgba(148, 163, 184, 0.55);
+}
+
+.rail-section--stage {
+  --rail-accent: rgba(59, 130, 246, 0.38);
+}
+
+.rail-section--actions {
+  --rail-accent: rgba(100, 116, 139, 0.38);
+}
+
+.rail-section--plain {
+  --rail-accent: rgba(148, 163, 184, 0.34);
+}
+
+.rail-subpanel {
+  border-radius: 10px;
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  background: rgba(255, 255, 255, 0.66);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75);
+}
+
+:global(.dark) .rail-section {
+  border-color: rgba(71, 85, 105, 0.66);
+  background:
+    linear-gradient(180deg, rgba(30, 41, 59, 0.58), rgba(15, 23, 42, 0.46));
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.22);
+}
+
+:global(.dark) .rail-section--meta {
+  --rail-accent: rgba(148, 163, 184, 0.38);
+}
+
+:global(.dark) .rail-section--stage {
+  --rail-accent: rgba(96, 165, 250, 0.34);
+}
+
+:global(.dark) .rail-section--actions {
+  --rail-accent: rgba(148, 163, 184, 0.26);
+}
+
+:global(.dark) .rail-section--plain {
+  --rail-accent: rgba(148, 163, 184, 0.22);
+}
+
+:global(.dark) .rail-subpanel {
+  border-color: rgba(71, 85, 105, 0.6);
+  background: rgba(15, 23, 42, 0.34);
+  box-shadow: inset 0 1px 0 rgba(148, 163, 184, 0.03);
 }
 
 .send-icon-btn {
