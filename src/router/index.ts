@@ -26,12 +26,6 @@ const routes: Array<RouteRecordRaw> = [
         meta: { title: 'Prompt设置', icon: CogOutline },
         component: () => import('@/views/prompt-studio/index.vue'),
       },
-        {
-            path: '/tem',
-            component: () => import('@/views/tem/index.vue'),
-            name: 'Tem',
-            meta: { title: '模版管理',icon: BrowsersOutline },
-        }
     ],
   },
     {

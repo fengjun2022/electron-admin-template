@@ -3,9 +3,7 @@
     <n-space vertical size="large">
       <n-card title="AI 检索与转笔记任务" :bordered="false">
         <n-space vertical>
-          <n-alert type="info" :show-icon="false">
-            当前后端地址：{{ authStore.apiBaseUrl || '未设置' }}
-          </n-alert>
+
 
           <n-input
             v-model:value="userInput"
