@@ -205,9 +205,15 @@ const historyRecords = computed<HistoryRecord[]>(() => {
       route.path === '/home' &&
       String(route.query.session || '') === s.session_uuid,
     data: s,
-    sortTs: Date.parse(String(s.last_message_at || s.updated_at || s.created_at || '')) || 0,
+      sortTs: Date.parse(String(s.last_message_at || s.updated_at || s.created_at || '')) || 0,
   }))
+  const visibleChatSessionIds = new Set(chatRecords.map((x) => x.id))
   const jobRecords = jobsStore.recentJobIds.map((id) => {
+    const sourceSession = chatStore.getJobSourceSession(id)
+    if (sourceSession && visibleChatSessionIds.has(sourceSession)) {
+      // 已经有对应聊天会话历史时，不再单独展示任务记录，避免“一次任务显示两条”。
+      return null
+    }
     const snap = jobsStore.jobs[id]?.snapshot
     const stage = humanizeStage(String(snap?.stage || ''))
     return {
@@ -220,7 +226,7 @@ const historyRecords = computed<HistoryRecord[]>(() => {
       sortTs: Date.parse(String(snap?.updated_at || snap?.created_at || '')) || 0,
     }
   })
-  return [...chatRecords, ...jobRecords]
+  return [...chatRecords, ...jobRecords.filter(Boolean) as HistoryRecord[]]
     .sort((a, b) => (b.sortTs || 0) - (a.sortTs || 0))
     .slice(0, 50)
 })
@@ -278,6 +284,7 @@ function statusLabel(status?: string) {
   if (status === 'failed') return '失败'
   if (status === 'running') return '运行中'
   if (status === 'queued') return '排队中'
+  if (status === 'waiting_user_pick') return '等待选择视频'
   return '未开始'
 }
 
@@ -285,6 +292,9 @@ function humanizeStage(stage: string) {
   const s = (stage || '').trim()
   if (!s) return ''
   if (s.includes('search_round_')) return 'AI 检索与筛选中'
+  if (s === 'waiting_user_pick') return '等待选择视频'
+  if (s === 'queue_waiting') return '排队等待处理'
+  if (s === 'queue_waiting_children') return '已入队，等待逐个处理'
   if (s === 'run_selected_video_pipelines') return '处理选中视频中'
   if (s === 'extract_audio_url') return '提取音频链接'
   if (s === 'download_audio') return '下载音频'
