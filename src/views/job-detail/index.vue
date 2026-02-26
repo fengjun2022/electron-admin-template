@@ -12,7 +12,7 @@
           <n-space>
             <n-button @click="refreshJob" :loading="loadingJob">刷新</n-button>
             <n-button @click="toggleSse">{{ sseBtnText }}</n-button>
-            <n-button @click="goHome" quaternary>返回任务中心</n-button>
+            <n-button @click="goHome" quaternary>{{ backButtonLabel }}</n-button>
           </n-space>
         </n-space>
 
@@ -79,6 +79,18 @@
           <n-alert v-if="job?.error" type="error" :show-icon="false">
             {{ humanizeError(job.error) }}
           </n-alert>
+          <n-alert v-if="singleJobKnowledgeReused" type="success" :show-icon="false">
+            <div class="font-medium">已复用知识：该视频已有历史笔记，系统跳过了重复处理流程。</div>
+            <div class="text-xs opacity-80 mt-1" v-if="singleKnowledgeMeta?.title || singleKnowledgeMeta?.video_url">
+              来源：
+              {{ singleKnowledgeMeta?.title || '历史知识条目' }}
+              <template v-if="singleKnowledgeMeta?.up_name">（UP：{{ singleKnowledgeMeta?.up_name }}）</template>
+              <template v-if="singleKnowledgeMeta?.duration_text"> · 时长 {{ singleKnowledgeMeta?.duration_text }}</template>
+            </div>
+          </n-alert>
+          <n-alert v-else-if="reusedVideoRuns.length" type="info" :show-icon="false">
+            已复用知识：本任务共复用了 {{ reusedVideoRuns.length }} 个已处理视频笔记，跳过重复转写/生成步骤。
+          </n-alert>
         </n-space>
       </n-card>
 
@@ -86,7 +98,7 @@
         <n-gi>
           <n-card title="AI 过程日志" :bordered="false">
 
-            <div class="h-[420px] overflow-auto rounded-md p-3 bg-black/10 dark:bg-white/5">
+            <div ref="aiLogsContainerRef" class="h-[420px] overflow-auto rounded-md p-3 bg-black/10 dark:bg-white/5">
               <template v-if="displayLogs.length">
                 <div
                   v-for="(log, idx) in displayLogs"
@@ -129,6 +141,7 @@
                   <div><strong>阶段：</strong>{{ displayStage }}</div>
                   <div><strong>说明：</strong>{{ displayDetail }}</div>
                   <div v-if="videoRuns.length"><strong>已处理视频：</strong>{{ videoRuns.length }} 个</div>
+                  <div v-if="reusedVideoRuns.length"><strong>复用知识：</strong>{{ reusedVideoRuns.length }} 个视频</div>
                   <div v-if="noteLink"><strong>结果文件：</strong>{{ noteLink.file_name }}</div>
                 </n-space>
               </n-tab-pane>
@@ -139,9 +152,18 @@
                       <n-space vertical size="small" class="w-full">
                         <n-space justify="space-between">
                           <div class="font-medium truncate max-w-[420px]">{{ v.title || v.bili_url }}</div>
-                          <n-tag size="small" :type="statusTagType(v.status)">{{ statusLabel(v.status) }}</n-tag>
+                          <n-space size="small">
+                            <n-tag v-if="v.pipeline_result?.knowledge_reused" size="small" type="success">已复用知识</n-tag>
+                            <n-tag size="small" :type="statusTagType(v.status)">{{ statusLabel(v.status) }}</n-tag>
+                          </n-space>
                         </n-space>
                         <div class="text-xs opacity-70 break-all">{{ v.bili_url }}</div>
+                        <div
+                          v-if="v.pipeline_result?.knowledge_reused"
+                          class="text-xs text-green-600 dark:text-green-400"
+                        >
+                          命中全局知识库，跳过重复处理，直接复用历史笔记。
+                        </div>
                         <div v-if="v.pipeline_result?.note_md" class="text-xs opacity-70">
                           中间笔记已生成（信息保留版）
                         </div>
@@ -222,7 +244,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   NAlert,
@@ -243,6 +265,7 @@ import {
   useMessage,
 } from 'naive-ui'
 import { useJobsStore } from '@/stores/modules/useJobsStore'
+import { useChatStore } from '@/stores/modules/useChatStore'
 import { buildJobNoteDownloadUrl } from '@/api/jobs'
 import { getApiBaseUrl } from '@/api/client'
 
@@ -250,9 +273,11 @@ const route = useRoute()
 const router = useRouter()
 const message = useMessage()
 const jobsStore = useJobsStore()
+const chatStore = useChatStore()
 
 const loadingJob = ref(false)
 const loadingNote = ref(false)
+const aiLogsContainerRef = ref<HTMLElement | null>(null)
 
 const jobId = computed(() => String(route.params.jobId || ''))
 const jobState = computed(() => jobsStore.jobs[jobId.value] || null)
@@ -264,6 +289,17 @@ const videoRuns = computed(() => {
   const result = job.value?.result as any
   return Array.isArray(result?.video_runs) ? result.video_runs : []
 })
+const jobResult = computed(() => (job.value?.result as any) || {})
+const singleJobKnowledgeReused = computed(
+  () =>
+    Boolean(jobResult.value?.knowledge_reused) ||
+    String(jobResult.value?.task_state || '') === 'reused_from_global_knowledge',
+)
+const singleKnowledgeMeta = computed(() => {
+  const meta = jobResult.value?.knowledge_meta
+  return meta && typeof meta === 'object' ? meta : null
+})
+const reusedVideoRuns = computed(() => videoRuns.value.filter((v: any) => Boolean(v?.pipeline_result?.knowledge_reused)))
 
 const noteTextLocal = computed({
   get: () => jobState.value?.noteText || '',
@@ -278,6 +314,9 @@ const noteDownloadFullUrl = computed(() => {
 })
 
 const sseBtnText = computed(() => (jobState.value?.sseStatus === 'connected' ? '暂停实时连接' : '开启实时连接'))
+const sourceSessionFromRoute = computed(() => String(route.query.session || '').trim())
+const sourceSession = computed(() => sourceSessionFromRoute.value || chatStore.getJobSourceSession(jobId.value))
+const backButtonLabel = computed(() => (sourceSession.value ? '返回对话' : '返回任务中心'))
 
 const displayStage = computed(() => humanizeStage(job.value?.stage || ''))
 const displayDetail = computed(() => humanizeDetail(job.value?.detail || '', job.value?.stage || ''))
@@ -357,6 +396,16 @@ const displayEvents = computed(() => {
     })
 })
 
+watch(
+  () => displayLogs.value.length,
+  async () => {
+    await nextTick()
+    const el = aiLogsContainerRef.value
+    if (!el) return
+    el.scrollTop = el.scrollHeight
+  },
+)
+
 async function refreshJob() {
   if (!jobId.value) return
   loadingJob.value = true
@@ -405,6 +454,16 @@ async function copyDownloadUrl() {
 }
 
 function goHome() {
+  const from = String(route.query.from || '')
+  const session = sourceSession.value
+  if (from === 'chat' && session) {
+    router.push({ path: '/home', query: { session } })
+    return
+  }
+  if (session) {
+    router.push({ path: '/home', query: { session } })
+    return
+  }
   router.push('/home')
 }
 

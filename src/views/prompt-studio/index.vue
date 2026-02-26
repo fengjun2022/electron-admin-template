@@ -2,15 +2,7 @@
   <div class="p-4 h-full overflow-auto">
     <n-space vertical size="large">
       <n-card title="Prompt 设置（Markdown 输出格式）" :bordered="false">
-        <n-space vertical>
-          <n-form-item label="后端服务地址（当前前端调用）">
-            <n-input v-model:value="apiBaseUrlDraft" placeholder="http://47.101.128.4:2002/robt" />
-          </n-form-item>
-          <n-space justify="space-between">
-            <n-button @click="goHome" quaternary>返回任务中心</n-button>
-            <n-button type="primary" @click="saveApiBaseUrl">保存后端地址</n-button>
-          </n-space>
-        </n-space>
+
       </n-card>
 
       <n-card title="当前用户 Prompt 自定义规则" :bordered="false">

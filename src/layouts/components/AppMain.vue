@@ -23,7 +23,7 @@
         leave-to-class="opacity-0 -translate-y-4"
         mode="out-in"
       >
-        <component :is="Component" :key="route.fullPath" />
+        <component :is="Component" :key="route.path" />
       </Transition>
     </RouterView>
   </main>

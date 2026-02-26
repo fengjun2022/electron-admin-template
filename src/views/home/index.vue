@@ -1,8 +1,8 @@
 <template>
   <div class="p-2 h-full overflow-hidden">
-    <n-grid :cols="24" x-gap="12" class="h-full">
-      <n-gi :span="showTaskRail ? 18 : 24" class="h-full chat-pane-gi">
-        <n-card :bordered="false" class="h-full">
+    <div class="home-shell h-full">
+      <div class="h-full home-main-pane">
+        <n-card :bordered="false" class="h-full home-main-card">
           <div class="h-full flex flex-col">
             <div class="px-2 pb-2 flex items-center justify-between gap-3">
               <div class="flex items-center gap-3 min-w-0">
@@ -20,10 +20,16 @@
 
             <div ref="messagesContainerRef" class="flex-1 min-h-0 overflow-auto px-1 py-1">
               <div class="space-y-4">
-                <div v-if="messages.length === 0" class="h-full min-h-[220px] flex items-center justify-center">
+                <div v-if="loadingSessionMessages" class="h-full min-h-[220px] flex items-center justify-center">
+                  <div class="flex flex-col items-center gap-3 text-sm opacity-75">
+                    <n-spin size="small" />
+                    <span>正在加载历史会话...</span>
+                  </div>
+                </div>
+                <div v-else-if="messages.length === 0" class="h-full min-h-[220px] flex items-center justify-center">
                   <div class="max-w-xl px-6">
                     <div class="text-lg font-semibold mb-2 text-center">我是小知,你可以和我对话或让我为你创建一个知识检索任务</div>
-                    <div class="text-sm opacity-70 leading-6 text-left">
+                    <div class="text-sm opacity-70 whitespace-nowrap leading-6 text-left">
                       你可以先问功能、问概念、问思路。需要我去 B 站检索并整理笔记时，再打开“知识检索”发送即可。
                     </div>
                   </div>
@@ -49,10 +55,16 @@
                       class="rounded-2xl px-4 py-3 whitespace-pre-wrap break-words message-bubble"
                       :class="[
                         msg.role === 'user' ? 'message-user' : 'message-assistant',
+                        msg.pending ? 'message-pending' : '',
                         msg.pending ? 'opacity-70' : '',
                       ]"
                     >
-                      <div v-if="msg.pending" class="text-sm opacity-70">思考中...</div>
+                      <div v-if="msg.pending" class="thinking-indicator text-sm">
+                        <span class="thinking-indicator__label">思考中</span>
+                        <span class="thinking-indicator__dots" aria-hidden="true">
+                          <i></i><i></i><i></i>
+                        </span>
+                      </div>
                       <div v-else>{{ msg.content }}</div>
                     </div>
 
@@ -72,6 +84,156 @@
                       >
                         查看任务详情
                       </n-button>
+                    </div>
+
+                    <div v-if="msg.role === 'assistant' && (msg.knowledgeHits || []).length" class="mt-3 px-1">
+                      <div class="rounded-2xl p-3 border border-slate-200/80 bg-white/70 dark:bg-slate-900/30 dark:border-slate-700/60">
+                        <div class="flex items-center justify-between gap-2 mb-2">
+                          <div class="text-xs opacity-70">知识命中（全局知识库）</div>
+                          <n-tag size="small" type="success">{{ (msg.knowledgeHits || []).length }}</n-tag>
+                        </div>
+                        <div class="space-y-2">
+                          <div
+                            v-for="(hit, idx) in (msg.knowledgeHits || [])"
+                            :key="knowledgeHitKey(hit, idx)"
+                            class="rounded-xl border border-slate-200/80 dark:border-slate-700/50 p-3 bg-white/70 dark:bg-slate-800/30"
+                          >
+                            <div class="flex items-start justify-between gap-3">
+                              <div class="min-w-0 flex-1">
+                                <div class="text-xs opacity-60 mb-1">
+                                  {{ hit.doc_type === 'video' ? '视频笔记' : '主题笔记' }}
+                                </div>
+                                <div class="text-sm font-medium leading-5 break-words">
+                                  {{ String(hit.title || '未命名知识') }}
+                                </div>
+                                <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs opacity-70">
+                                  <span v-if="hit.up_name">UP：{{ String(hit.up_name) }}</span>
+                                  <span v-if="hit.duration_text">时长：{{ String(hit.duration_text) }}</span>
+                                </div>
+                                <div v-if="hit.snippet" class="text-xs opacity-70 mt-2 break-words">
+                                  {{ String(hit.snippet) }}
+                                </div>
+                              </div>
+                              <n-button
+                                v-if="hit.source_url"
+                                size="tiny"
+                                secondary
+                                @click="openKnowledgeHitSource(hit)"
+                              >
+                                查看来源
+                              </n-button>
+                            </div>
+                          </div>
+                        </div>
+                        <div class="text-xs opacity-60 mt-2">
+                          命中的是全局共享知识库结果；如果你仍要重新检索最新视频，可以继续让我创建任务。
+                        </div>
+                      </div>
+                    </div>
+
+                    <div
+                      v-if="msg.role === 'assistant' && msg.task?.job_id"
+                      class="mt-3 px-1"
+                    >
+                      <div
+                        v-if="jobVideoCandidates(msg.task.job_id).length"
+                        class="rounded-2xl p-3 border border-slate-200/80 bg-white/70 dark:bg-slate-900/30 dark:border-slate-700/60"
+                      >
+                        <div class="text-xs opacity-70 mb-2">AI 挑选的相关视频（可播放预览）</div>
+                        <div class="space-y-3">
+                          <div
+                            v-for="(video, idx) in jobVideoCandidates(msg.task.job_id)"
+                            :key="`${msg.task.job_id}-${video.url || video.title || idx}`"
+                            class="rounded-xl border border-slate-200/80 dark:border-slate-700/50 p-3 bg-white/70 dark:bg-slate-800/30"
+                          >
+                            <div class="flex items-start gap-3">
+                              <div class="w-28 shrink-0">
+                                <div class="rounded-lg overflow-hidden border border-slate-200/80 dark:border-slate-700/50 bg-slate-100 dark:bg-slate-900/40">
+                                  <img
+                                    v-if="videoCoverUrl(video)"
+                                    :src="videoCoverUrl(video) || undefined"
+                                    alt="视频封面"
+                                    class="w-full aspect-video object-cover"
+                                    loading="lazy"
+                                  />
+                                  <div v-else class="w-full aspect-video flex items-center justify-center text-[11px] opacity-60">
+                                    无封面
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div class="min-w-0 flex-1">
+                                <div class="text-sm font-medium leading-5 break-words">
+                                  {{ video.title || `候选视频 ${idx + 1}` }}
+                                </div>
+                                <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs opacity-70">
+                                  <span v-if="video.up">UP：{{ String(video.up) }}</span>
+                                  <span v-if="video.duration">时长：{{ String(video.duration) }}</span>
+                                </div>
+                                <div v-if="video.reason" class="text-xs opacity-70 mt-2 break-words">
+                                  推荐理由：{{ String(video.reason) }}
+                                </div>
+                                <div v-if="video.from_keyword" class="text-xs opacity-60 mt-1">
+                                  关键词：{{ String(video.from_keyword) }}
+                                </div>
+                                <div v-if="video.stats" class="text-xs opacity-60 mt-1 break-words">
+                                  {{ String(video.stats) }}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div class="mt-3 flex items-center justify-end">
+                              <n-space size="small">
+                                <n-button
+                                  size="tiny"
+                                  secondary
+                                  @click="toggleVideoPreview(msg.task.job_id, video)"
+                                  :disabled="!videoEmbedUrl(video)"
+                                >
+                                  {{ activeVideoPreviewKey(msg.task.job_id) === videoPreviewKey(video) ? '收起预览' : '预览' }}
+                                </n-button>
+                                <n-button
+                                  size="tiny"
+                                  type="primary"
+                                  ghost
+                                  @click="openVideoUrl(video)"
+                                  :disabled="!String(video.url || '').trim()"
+                                >
+                                  打开B站
+                                </n-button>
+                                <n-button
+                                  size="tiny"
+                                  type="primary"
+                                  @click="selectCandidateVideo(msg.task.job_id, video)"
+                                  :loading="isSelectingCandidateVideo(msg.task.job_id, video)"
+                                  :disabled="!String(video.url || '').trim() || !chatSessionUuid"
+                                >
+                                  选择并处理
+                                </n-button>
+                              </n-space>
+                            </div>
+
+                            <div
+                              v-if="activeVideoPreviewKey(msg.task.job_id) === videoPreviewKey(video) && videoEmbedUrl(video)"
+                              class="mt-3 overflow-hidden rounded-lg border border-slate-200/80 dark:border-slate-700/50"
+                            >
+                              <iframe
+                                :src="videoEmbedUrl(video) || undefined"
+                                class="w-full aspect-video bg-black"
+                                frameborder="0"
+                                allowfullscreen
+                                scrolling="no"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      <div
+                        v-else-if="isTopicTask(msg.task.job_id)"
+                        class="text-xs opacity-60"
+                      >
+                        候选视频将在任务检索阶段完成后显示在这里。
+                      </div>
                     </div>
                   </div>
 
@@ -133,11 +295,12 @@
             </div>
           </div>
         </n-card>
-      </n-gi>
+      </div>
 
-      <n-gi v-if="showTaskRail" :span="6" class="h-full task-rail-gi">
-        <transition name="task-rail-drawer" appear>
-          <n-card v-if="showTaskRail" :bordered="false" class="h-full right-rail-card">
+      <div class="h-full task-rail-shell" :class="{ 'task-rail-shell--open': showTaskRail }">
+        <div class="h-full task-rail-shell__inner">
+          <transition name="task-rail-drawer" appear>
+            <n-card v-if="showTaskRail" :bordered="false" class="h-full right-rail-card">
           <template #header>
             <div class="flex items-center justify-between">
               <span class="font-semibold">当前任务进度</span>
@@ -239,24 +402,26 @@
             </div>
           </template>
           <n-empty v-else description="先在中间聊天；开启“知识检索”并发送后，才可能创建任务" />
-          </n-card>
-        </transition>
-      </n-gi>
-    </n-grid>
+            </n-card>
+          </transition>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { NButton, NCard, NDropdown, NEmpty, NGi, NGrid, NIcon, NInput, NSpace, NTag, useMessage } from 'naive-ui'
+import { NButton, NCard, NDropdown, NEmpty, NIcon, NInput, NSpace, NSpin, NTag, useMessage } from 'naive-ui'
 import { ArrowUpOutline, ChevronDownOutline } from '@vicons/ionicons5'
 import { useJobsStore } from '@/stores/modules/useJobsStore'
+import { useChatStore } from '@/stores/modules/useChatStore'
 import { useAuthStore } from '@/stores/modules/useAuthStore'
 import { useGlobalStore } from '@/stores/global-store'
-import { createChatSessionApi, listChatModelsApi, sendChatMessageStreamApi } from '@/api/chat'
+import { createChatSessionApi, listChatMessagesApi, listChatModelsApi, selectChatCandidateVideoApi, sendChatMessageStreamApi } from '@/api/chat'
 import { buildJobNoteDownloadUrl } from '@/api/jobs'
-import type { ChatMessage, ChatModelItem, JobCreateResponse } from '@/api/types'
+import type { ChatMessage, ChatModelItem, JobCreateResponse, TopicSelectedVideo } from '@/api/types'
 
 type UiChatMessage = {
   localId: string
@@ -265,12 +430,17 @@ type UiChatMessage = {
   pending?: boolean
   task?: JobCreateResponse | null
   toolDecisionReason?: string
+  autoTask?: boolean
+  knowledgeLookupUsed?: boolean
+  knowledgeLookupReason?: string
+  knowledgeHits?: Array<Record<string, any>>
 }
 
 const router = useRouter()
 const route = useRoute()
 const message = useMessage()
 const jobsStore = useJobsStore()
+const chatStore = useChatStore()
 const authStore = useAuthStore()
 const globalStore = useGlobalStore()
 
@@ -286,6 +456,10 @@ const selectedModel = ref<string | null>(null)
 const modelsLoading = ref(false)
 const messagesContainerRef = ref<HTMLElement | null>(null)
 const routeNewChatToken = ref<string>('')
+const loadingSessionMessages = ref(false)
+const skipNextRouteSessionHydrateUuid = ref('')
+const videoPreviewState = ref<Record<string, string>>({})
+const selectingVideoState = ref<Record<string, boolean>>({})
 
 const currentJobState = computed(() => (jobsStore.currentJobId ? jobsStore.jobs[jobsStore.currentJobId] : null))
 const currentSnapshot = computed(() => currentJobState.value?.snapshot || null)
@@ -354,8 +528,9 @@ onMounted(async () => {
     if (cached) selectedModel.value = cached
   }
 
-  await Promise.allSettled([bootstrapCurrentJob(), loadChatModels()])
+  await Promise.allSettled([bootstrapCurrentJob(), loadChatModels(), chatStore.refreshSessions().catch(() => undefined)])
   handleNewChatRouteSignal(String(route.query.newChat || ''))
+  void loadSessionFromRoute(String(route.query.session || ''))
 })
 
 watch(selectedModel, (val) => {
@@ -369,6 +544,14 @@ watch(
   (val) => {
     handleNewChatRouteSignal(String(val || ''))
   },
+)
+
+watch(
+  () => route.query.session,
+  (val) => {
+    void loadSessionFromRoute(String(val || ''))
+  },
+  { flush: 'sync' },
 )
 
 watch(
@@ -428,10 +611,13 @@ function handleNewChatRouteSignal(token: string) {
 
 function startNewConversation() {
   resetCurrentTaskState()
+  chatStore.clearCurrentSession()
   chatSessionUuid.value = ''
   messages.value = []
+  loadingSessionMessages.value = false
   userInput.value = ''
   knowledgeRetrievalEnabled.value = false
+  videoPreviewState.value = {}
 }
 
 function resetCurrentTaskState() {
@@ -443,10 +629,72 @@ function resetCurrentTaskState() {
 
 async function ensureChatSession() {
   if (chatSessionUuid.value) return chatSessionUuid.value
-  const title = messages.value.find((m) => m.role === 'user')?.content || ''
+  const title = messages.value.find((m) => m.role === 'user')?.content || userInput.value.trim() || ''
   const res = await createChatSessionApi(title)
   chatSessionUuid.value = res.session.session_uuid
+  chatStore.setCurrentSession(chatSessionUuid.value)
+  chatStore.upsertSession(res.session)
+  skipNextRouteSessionHydrateUuid.value = chatSessionUuid.value
+  void router.replace({ path: '/home', query: { session: chatSessionUuid.value } })
   return chatSessionUuid.value
+}
+
+async function loadSessionFromRoute(sessionUuidFromRoute: string) {
+  const sessionUuid = (sessionUuidFromRoute || '').trim()
+  if (!sessionUuid) return
+  if (route.query.newChat) return
+  if (skipNextRouteSessionHydrateUuid.value && skipNextRouteSessionHydrateUuid.value === sessionUuid) {
+    skipNextRouteSessionHydrateUuid.value = ''
+    return
+  }
+  if (chatSessionUuid.value === sessionUuid && messages.value.length > 0) return
+  try {
+    loadingSessionMessages.value = true
+    messages.value = []
+    chatStore.setCurrentSession(sessionUuid)
+    chatSessionUuid.value = sessionUuid
+    const res = await listChatMessagesApi(sessionUuid, 100)
+    const loaded = (res.items || []).map((m) => ({
+      localId: `srv-${m.id || Math.random().toString(36).slice(2, 8)}`,
+      role: (m.role === 'assistant' ? 'assistant' : 'user') as 'assistant' | 'user',
+      content: String(m.content || ''),
+      pending: false,
+      task: (m.meta?.task as JobCreateResponse | null) ?? null,
+      toolDecisionReason: String(m.meta?.tool_decision?.reason || '').trim() || undefined,
+      autoTask: Boolean(m.meta?.auto_task),
+      knowledgeLookupUsed: Boolean(m.meta?.knowledge_lookup?.used),
+      knowledgeLookupReason: String(m.meta?.knowledge_lookup?.reason || '').trim() || undefined,
+      knowledgeHits: Array.isArray(m.meta?.knowledge_hits) ? (m.meta?.knowledge_hits as Array<Record<string, any>>) : [],
+    }))
+    messages.value = loaded
+
+    const taskJobIds = loaded
+      .filter((m) => m.role === 'assistant' && m.task?.job_id)
+      .map((m) => String(m.task?.job_id || '').trim())
+      .filter(Boolean)
+    const latestTaskJobId = taskJobIds[taskJobIds.length - 1] || ''
+    const shouldShowKnowledgeMode = loaded.some((m) => m.autoTask || m.task)
+    knowledgeRetrievalEnabled.value = shouldShowKnowledgeMode
+
+    if (latestTaskJobId) {
+      chatStore.bindJobToSession(latestTaskJobId, sessionUuid)
+      jobsStore.setCurrentJob(latestTaskJobId)
+      try {
+        const snap = await jobsStore.fetchJob(latestTaskJobId)
+        if (snap?.status === 'running' || snap?.status === 'queued') {
+          jobsStore.connectJobEvents(latestTaskJobId)
+        }
+      } catch {
+        // ignore task bootstrap errors when restoring chat history
+      }
+    } else {
+      resetCurrentTaskState()
+    }
+  } catch {
+    // keep current UI state if loading old session fails
+  } finally {
+    loadingSessionMessages.value = false
+  }
 }
 
 function appendUiMessage(payload: Partial<UiChatMessage> & Pick<UiChatMessage, 'role' | 'content'>) {
@@ -457,9 +705,14 @@ function appendUiMessage(payload: Partial<UiChatMessage> & Pick<UiChatMessage, '
     pending: payload.pending,
     task: payload.task ?? null,
     toolDecisionReason: payload.toolDecisionReason,
+    autoTask: payload.autoTask,
+    knowledgeLookupUsed: payload.knowledgeLookupUsed,
+    knowledgeLookupReason: payload.knowledgeLookupReason,
+    knowledgeHits: Array.isArray(payload.knowledgeHits) ? payload.knowledgeHits : [],
   }
   messages.value.push(item)
-  return item
+  const last = messages.value[messages.value.length - 1]
+  return (last || item) as UiChatMessage
 }
 
 function mapAssistantMessage(msg: ChatMessage, task: JobCreateResponse | null, toolDecision?: { reason?: string }) {
@@ -469,6 +722,10 @@ function mapAssistantMessage(msg: ChatMessage, task: JobCreateResponse | null, t
     task: task ?? (msg?.meta?.task as JobCreateResponse | null) ?? null,
     toolDecisionReason:
       String(toolDecision?.reason || msg?.meta?.tool_decision?.reason || '').trim() || undefined,
+    autoTask: Boolean(msg?.meta?.auto_task),
+    knowledgeLookupUsed: Boolean(msg?.meta?.knowledge_lookup?.used),
+    knowledgeLookupReason: String(msg?.meta?.knowledge_lookup?.reason || '').trim() || undefined,
+    knowledgeHits: Array.isArray(msg?.meta?.knowledge_hits) ? (msg?.meta?.knowledge_hits as Array<Record<string, any>>) : [],
   })
 }
 
@@ -493,6 +750,44 @@ async function sendMessage() {
     let taskHandled = false
     let gotAnyDelta = false
     let savedAssistantContent = ''
+    const typewriterQueue: string[] = []
+    let typewriterTimer: number | null = null
+    let finalDoneText = ''
+
+    const stopTypewriter = () => {
+      if (typewriterTimer !== null && typeof window !== 'undefined') {
+        window.clearInterval(typewriterTimer)
+      }
+      typewriterTimer = null
+    }
+
+    const typewriterTick = () => {
+      if (!typewriterQueue.length) {
+        stopTypewriter()
+        return
+      }
+      const batchSize = Math.min(3, typewriterQueue.length)
+      let chunk = ''
+      for (let i = 0; i < batchSize; i += 1) {
+        const nextChar = typewriterQueue.shift()
+        if (nextChar) chunk += nextChar
+      }
+      if (chunk) {
+        pendingAssistant.pending = false
+        pendingAssistant.content = `${pendingAssistant.content || ''}${chunk}`
+      }
+      if (!typewriterQueue.length && finalDoneText && !String(pendingAssistant.content || '').trim()) {
+        pendingAssistant.content = finalDoneText
+      }
+    }
+
+    const enqueueTypewriter = (textChunk: string) => {
+      if (!textChunk) return
+      for (const ch of textChunk) typewriterQueue.push(ch)
+      if (typewriterTimer === null && typeof window !== 'undefined') {
+        typewriterTimer = window.setInterval(typewriterTick, 18)
+      }
+    }
 
     await sendChatMessageStreamApi(
       sessionUuid,
@@ -506,10 +801,18 @@ async function sendMessage() {
           taskInfo = (meta?.task as JobCreateResponse | null) || null
           shouldCreateJob = Boolean(meta?.tool_decision?.should_create_job)
           toolDecisionReason = String(meta?.tool_decision?.reason || '').trim()
+          pendingAssistant.knowledgeLookupUsed = Boolean(meta?.knowledge_lookup?.used)
+          pendingAssistant.knowledgeLookupReason = String(meta?.knowledge_lookup?.reason || '').trim() || undefined
+          pendingAssistant.knowledgeHits = Array.isArray(meta?.knowledge_hits)
+            ? (meta.knowledge_hits as Array<Record<string, any>>)
+            : []
           if (taskInfo?.job_id && !taskHandled) {
             taskHandled = true
             pendingAssistant.task = taskInfo
             pendingAssistant.toolDecisionReason = toolDecisionReason || undefined
+            if (chatSessionUuid.value) {
+              chatStore.bindJobToSession(taskInfo.job_id, chatSessionUuid.value)
+            }
             void (async () => {
               jobsStore.setCurrentJob(taskInfo!.job_id)
               try {
@@ -529,10 +832,11 @@ async function sendMessage() {
         onDelta: (deltaText) => {
           gotAnyDelta = gotAnyDelta || !!deltaText
           pendingAssistant.pending = false
-          pendingAssistant.content = `${pendingAssistant.content || ''}${deltaText || ''}`
+          enqueueTypewriter(String(deltaText || ''))
         },
         onDone: (doneData) => {
           pendingAssistant.pending = false
+          finalDoneText = String(doneData?.text || '')
           if (!gotAnyDelta && String(doneData?.text || '')) {
             pendingAssistant.content = String(doneData.text)
           }
@@ -549,6 +853,15 @@ async function sendMessage() {
           }
           if (msg?.meta?.task && !pendingAssistant.task) {
             pendingAssistant.task = msg.meta.task as JobCreateResponse
+            if (chatSessionUuid.value && pendingAssistant.task?.job_id) {
+              chatStore.bindJobToSession(pendingAssistant.task.job_id, chatSessionUuid.value)
+            }
+          }
+          pendingAssistant.knowledgeLookupUsed = Boolean(msg?.meta?.knowledge_lookup?.used) || pendingAssistant.knowledgeLookupUsed
+          pendingAssistant.knowledgeLookupReason =
+            String(msg?.meta?.knowledge_lookup?.reason || '').trim() || pendingAssistant.knowledgeLookupReason
+          if (Array.isArray(msg?.meta?.knowledge_hits)) {
+            pendingAssistant.knowledgeHits = msg.meta.knowledge_hits as Array<Record<string, any>>
           }
         },
       },
@@ -556,11 +869,24 @@ async function sendMessage() {
 
     pendingAssistant.pending = false
     pendingAssistant.toolDecisionReason = toolDecisionReason || pendingAssistant.toolDecisionReason
+    if (typewriterTimer !== null) {
+      // 若流结束时还有少量排队字符，快速刷完，避免“思考中”后半截丢失。
+      while (typewriterQueue.length) typewriterTick()
+      stopTypewriter()
+    }
 
     if (!String(pendingAssistant.content || '').trim()) {
       pendingAssistant.content = savedAssistantContent || '我已收到。'
     }
+    chatStore.upsertSession({
+      session_uuid: sessionUuid,
+      title: messages.value.find((m) => m.role === 'user')?.content || text,
+      last_message_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    void chatStore.refreshSessions().catch(() => undefined)
   } catch (e: any) {
+    // 若流式中断，停止打字机队列
     pendingAssistant.pending = false
     pendingAssistant.content = `发送失败：${e?.message || '未知错误'}`
     message.error(e?.message || '发送失败')
@@ -593,7 +919,140 @@ function toggleCurrentJobSse() {
 }
 
 function openJob(id: string) {
+  const session = String(chatSessionUuid.value || chatStore.getJobSourceSession(id) || '').trim()
+  if (session) {
+    router.push({ path: `/jobs/${id}`, query: { from: 'chat', session } })
+    return
+  }
   router.push(`/jobs/${id}`)
+}
+
+function jobVideoCandidates(jobId: string): TopicSelectedVideo[] {
+  const result = jobsStore.jobs[jobId]?.snapshot?.result as any
+  const items = result?.selected_videos
+  return Array.isArray(items) ? (items as TopicSelectedVideo[]) : []
+}
+
+function isTopicTask(jobId: string) {
+  const kind = String(jobsStore.jobs[jobId]?.snapshot?.kind || '')
+  return kind === 'topic'
+}
+
+function videoPreviewKey(video: TopicSelectedVideo) {
+  return String(video.url || video.title || '').trim()
+}
+
+function activeVideoPreviewKey(jobId: string) {
+  return String(videoPreviewState.value[jobId] || '')
+}
+
+function extractBvid(text: string) {
+  const m = String(text || '').match(/BV[0-9A-Za-z]{10}/)
+  return m ? m[0] : ''
+}
+
+function videoEmbedUrl(video: TopicSelectedVideo) {
+  const bvid = extractBvid(String(video.url || '')) || extractBvid(String(video.title || ''))
+  if (!bvid) return ''
+  return `https://player.bilibili.com/player.html?bvid=${encodeURIComponent(bvid)}&page=1`
+}
+
+function toggleVideoPreview(jobId: string, video: TopicSelectedVideo) {
+  const key = videoPreviewKey(video)
+  if (!key) return
+  if (videoPreviewState.value[jobId] === key) {
+    delete videoPreviewState.value[jobId]
+    videoPreviewState.value = { ...videoPreviewState.value }
+    return
+  }
+  videoPreviewState.value = { ...videoPreviewState.value, [jobId]: key }
+}
+
+function openVideoUrl(video: TopicSelectedVideo) {
+  const url = String(video.url || '').trim()
+  if (!url) return
+  if (typeof window !== 'undefined') window.open(url, '_blank', 'noopener,noreferrer')
+}
+
+function knowledgeHitKey(hit: Record<string, any>, idx: number) {
+  return String(hit.id || hit.source_url || hit.video_url || hit.title || idx)
+}
+
+function openKnowledgeHitSource(hit: Record<string, any>) {
+  const url = String(hit.source_url || hit.video_url || '').trim()
+  if (!url) return
+  if (typeof window !== 'undefined') window.open(url, '_blank', 'noopener,noreferrer')
+}
+
+function videoCoverUrl(video: TopicSelectedVideo) {
+  const raw = String((video as any).cover || '').trim()
+  if (!raw) return ''
+  if (raw.startsWith('//')) return `https:${raw}`
+  return raw
+}
+
+function candidateSelectKey(jobId: string, video: TopicSelectedVideo) {
+  return `${jobId}::${videoPreviewKey(video) || String(video.index || '')}`
+}
+
+function isSelectingCandidateVideo(jobId: string, video: TopicSelectedVideo) {
+  return Boolean(selectingVideoState.value[candidateSelectKey(jobId, video)])
+}
+
+async function selectCandidateVideo(parentJobId: string, video: TopicSelectedVideo) {
+  const sessionUuid = String(chatSessionUuid.value || '').trim()
+  const url = String(video.url || '').trim()
+  if (!sessionUuid) {
+    message.warning('当前会话不存在，无法提交选择')
+    return
+  }
+  if (!url) {
+    message.warning('该候选视频缺少链接')
+    return
+  }
+  const key = candidateSelectKey(parentJobId, video)
+  if (selectingVideoState.value[key]) return
+  selectingVideoState.value = { ...selectingVideoState.value, [key]: true }
+  try {
+    const res = await selectChatCandidateVideoApi(sessionUuid, parentJobId, {
+      video_index: typeof video.index === 'number' ? video.index : undefined,
+      video_url: url,
+    })
+    const task = res.task || null
+    const savedMsg = (res.assistant_message || null) as ChatMessage | null
+    if (savedMsg) {
+      const uiMsg = mapAssistantMessage(savedMsg, task, (savedMsg.meta?.tool_decision as any) || undefined)
+      if (task?.job_id) uiMsg.task = task
+    } else {
+      appendUiMessage({
+        role: 'assistant',
+        content: `已根据你的选择开始处理视频：${String(video.title || url)}。`,
+        task,
+        autoTask: true,
+      })
+    }
+    if (task?.job_id) {
+      chatStore.bindJobToSession(task.job_id, sessionUuid)
+      jobsStore.setCurrentJob(task.job_id)
+      knowledgeRetrievalEnabled.value = true
+      try {
+        await jobsStore.fetchJob(task.job_id)
+      } catch {
+        // ignore
+      }
+      jobsStore.connectJobEvents(task.job_id)
+    }
+    await nextTick()
+    const el = messagesContainerRef.value
+    if (el) el.scrollTop = el.scrollHeight
+    message.success('已创建所选视频处理任务')
+  } catch (e: any) {
+    message.error(e?.message || '选择视频处理失败')
+  } finally {
+    const nextState = { ...selectingVideoState.value }
+    delete nextState[key]
+    selectingVideoState.value = nextState
+  }
 }
 
 function clearInput() {
@@ -705,34 +1164,53 @@ function humanizeSidebarLog(text: string) {
   border-color: rgba(148, 163, 184, 0.25);
 }
 
-.chat-pane-gi {
-  transition: width 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+.home-shell {
+  display: flex;
+  gap: 12px;
+  min-height: 0;
 }
 
-.task-rail-gi {
-  transform-origin: right center;
+.home-main-pane {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+.task-rail-shell {
+  flex: 0 0 auto;
+  width: 0;
+  min-width: 0;
+  overflow: hidden;
+  transition: width 0.34s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.task-rail-shell--open {
+  width: clamp(320px, 24vw, 520px);
+}
+
+.task-rail-shell__inner {
+  width: clamp(320px, 24vw, 520px);
+  height: 100%;
 }
 
 .task-rail-drawer-enter-active,
 .task-rail-drawer-leave-active {
   transition:
-    opacity 0.24s ease,
-    transform 0.32s cubic-bezier(0.22, 1, 0.36, 1),
-    filter 0.28s ease;
+    transform 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+    clip-path 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform, clip-path;
 }
 
 .task-rail-drawer-enter-from,
 .task-rail-drawer-leave-to {
-  opacity: 0;
-  transform: translateX(20px) scale(0.985);
-  filter: blur(2px);
+  transform: translateX(44px);
+  clip-path: inset(0 0 0 100% round 16px);
 }
 
 .task-rail-drawer-enter-to,
 .task-rail-drawer-leave-from {
-  opacity: 1;
-  transform: translateX(0) scale(1);
-  filter: blur(0);
+  transform: translateX(0);
+  clip-path: inset(0 0 0 0 round 16px);
 }
 
 .model-inline-trigger {
@@ -782,6 +1260,13 @@ function humanizeSidebarLog(text: string) {
   display: flex;
   flex-direction: column;
   height: 100%;
+}
+
+:deep(.home-main-card > .n-card__content) {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
 }
 
 .rail-section {
@@ -908,6 +1393,59 @@ function humanizeSidebarLog(text: string) {
 
 .message-bubble {
   border: 1px solid transparent;
+}
+
+.message-pending,
+.message-pending * {
+  cursor: default !important;
+  user-select: none;
+}
+
+.thinking-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: rgba(51, 65, 85, 0.9);
+  font-weight: 500;
+}
+
+.thinking-indicator__dots {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 3px;
+  transform: translateY(1px);
+}
+
+.thinking-indicator__dots i {
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.32;
+  animation: thinking-dot-bounce 1s ease-in-out infinite;
+}
+
+.thinking-indicator__dots i:nth-child(2) {
+  animation-delay: 0.16s;
+}
+
+.thinking-indicator__dots i:nth-child(3) {
+  animation-delay: 0.32s;
+}
+
+@keyframes thinking-dot-bounce {
+  0%, 80%, 100% {
+    transform: translateY(0);
+    opacity: 0.28;
+  }
+  40% {
+    transform: translateY(-3px);
+    opacity: 0.9;
+  }
+}
+
+:global(.dark) .thinking-indicator {
+  color: rgba(226, 232, 240, 0.92);
 }
 
 .message-assistant {

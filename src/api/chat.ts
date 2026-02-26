@@ -1,9 +1,12 @@
 import { apiRequest, buildApiUrl, getAuthToken } from './client'
 import type {
+  ChatSelectCandidateVideoRequest,
+  ChatSelectCandidateVideoResponse,
   ChatMessagesResponse,
   ChatModelsResponse,
   ChatReplyRequest,
   ChatReplyResponse,
+  ChatSessionsResponse,
   ChatSessionCreateResponse,
 } from './types'
 
@@ -22,6 +25,20 @@ export function listChatModelsApi() {
   })
 }
 
+export function listChatSessionsApi(limit = 50) {
+  return apiRequest<ChatSessionsResponse>(`/chat/sessions?limit=${limit}`, {
+    method: 'GET',
+    auth: true,
+  })
+}
+
+export function deleteChatSessionApi(sessionUuid: string) {
+  return apiRequest<{ ok: boolean; session_uuid: string }>(`/chat/sessions/${sessionUuid}`, {
+    method: 'DELETE',
+    auth: true,
+  })
+}
+
 export function listChatMessagesApi(sessionUuid: string, limit = 100) {
   return apiRequest<ChatMessagesResponse>(`/chat/sessions/${sessionUuid}/messages?limit=${limit}`, {
     method: 'GET',
@@ -31,6 +48,18 @@ export function listChatMessagesApi(sessionUuid: string, limit = 100) {
 
 export function sendChatMessageApi(sessionUuid: string, payload: ChatReplyRequest) {
   return apiRequest<ChatReplyResponse>(`/chat/sessions/${sessionUuid}/messages`, {
+    method: 'POST',
+    body: payload,
+    auth: true,
+  })
+}
+
+export function selectChatCandidateVideoApi(
+  sessionUuid: string,
+  jobId: string,
+  payload: ChatSelectCandidateVideoRequest,
+) {
+  return apiRequest<ChatSelectCandidateVideoResponse>(`/chat/sessions/${sessionUuid}/jobs/${jobId}/select-video`, {
     method: 'POST',
     body: payload,
     auth: true,
@@ -99,11 +128,16 @@ export async function sendChatMessageStreamApi(
   }
 
   const flushBlocks = (final = false) => {
-    const parts = buffer.split('\n\n')
-    if (!final) buffer = parts.pop() || ''
-    else buffer = ''
+    const normalized = buffer.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+    const parts = normalized.split('\n\n')
+    if (!final) {
+      buffer = parts.pop() || ''
+    } else {
+      buffer = ''
+    }
 
     for (const block of parts) {
+      if (!block.trim()) continue
       const lines = block.split('\n')
       let eventName = 'message'
       const dataLines: string[] = []

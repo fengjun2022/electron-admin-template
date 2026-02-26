@@ -100,6 +100,10 @@ export interface TopicSelectedVideo {
   index?: number
   title?: string
   url?: string
+  cover?: string
+  up?: string
+  duration?: string
+  stats?: string
   reason?: string
   from_keyword?: string
   [key: string]: unknown
@@ -195,6 +199,23 @@ export interface ChatMessage {
       reason?: string
     }
     task?: JobCreateResponse | null
+    knowledge_lookup?: {
+      used?: boolean
+      reason?: string
+    }
+    knowledge_hits?: Array<{
+      id?: number
+      doc_type?: 'video' | 'topic' | string
+      title?: string
+      source_url?: string
+      up_name?: string
+      duration_text?: string
+      snippet?: string
+      note_model?: string
+      updated_at?: string
+      score?: number
+      [key: string]: unknown
+    }>
     [key: string]: unknown
   }
   created_at?: string
@@ -212,6 +233,11 @@ export interface ChatModelItem {
 export interface ChatSessionCreateResponse {
   ok: boolean
   session: ChatSession
+}
+
+export interface ChatSessionsResponse {
+  ok: boolean
+  items: ChatSession[]
 }
 
 export interface ChatModelsResponse {
@@ -239,4 +265,18 @@ export interface ChatReplyResponse {
     should_create_job?: boolean
     reason?: string
   }
+}
+
+export interface ChatSelectCandidateVideoRequest {
+  video_index?: number
+  video_url?: string
+}
+
+export interface ChatSelectCandidateVideoResponse {
+  ok: boolean
+  session_uuid: string
+  parent_job_id: string
+  selected_video?: TopicSelectedVideo | null
+  task: JobCreateResponse | null
+  assistant_message?: ChatMessage | null
 }

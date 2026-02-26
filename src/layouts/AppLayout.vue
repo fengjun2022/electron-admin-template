@@ -135,6 +135,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useGlobalStore } from '@/stores/global-store'
 import { getThemeColors } from '@/config/theme'
 import { useJobsStore } from '@/stores/modules/useJobsStore'
+import { useChatStore } from '@/stores/modules/useChatStore'
 
 // 导入布局组件
 import AppHeader from './components/AppHeader.vue'
@@ -145,6 +146,7 @@ import ChatSiderBar from '@/layouts/components/ChatSiderBar.vue'
 const globalStore = useGlobalStore()
 const { isHeaderVisible, isBreadcrumbBarVisible, isDarkMode, showSettingsDrawer, chatTaskParams } = storeToRefs(globalStore)
 const jobsStore = useJobsStore()
+const chatStore = useChatStore()
 const router = useRouter()
 const route = useRoute()
 
@@ -164,7 +166,7 @@ const checkMobile = () => {
 
 onMounted(() => {
   checkMobile()
-
+  void chatStore.refreshSessions().catch(() => undefined)
   window.addEventListener('resize', checkMobile)
 })
 
@@ -192,19 +194,35 @@ const fixedItems = ref<FixedItem[]>([
   },
 ])
 
-// 历史记录（真实任务历史）
+// 历史记录（聊天会话 + 任务）
 const historyRecords = computed<HistoryRecord[]>(() => {
-  return jobsStore.recentJobIds.map((id) => {
+  const chatRecords = chatStore.sessions.map((s) => ({
+    id: s.session_uuid,
+    type: 'chat' as const,
+    title: String(s.title || '新对话'),
+    subtitle: '聊天会话',
+    active:
+      route.path === '/home' &&
+      String(route.query.session || '') === s.session_uuid,
+    data: s,
+    sortTs: Date.parse(String(s.last_message_at || s.updated_at || s.created_at || '')) || 0,
+  }))
+  const jobRecords = jobsStore.recentJobIds.map((id) => {
     const snap = jobsStore.jobs[id]?.snapshot
     const stage = humanizeStage(String(snap?.stage || ''))
     return {
       id,
+      type: 'job' as const,
       title: snap?.user_input || '点击查看任务详情',
       subtitle: stage || statusLabel(String(snap?.status || '')),
       active: route.path === `/jobs/${id}` || jobsStore.currentJobId === id,
       data: snap,
+      sortTs: Date.parse(String(snap?.updated_at || snap?.created_at || '')) || 0,
     }
   })
+  return [...chatRecords, ...jobRecords]
+    .sort((a, b) => (b.sortTs || 0) - (a.sortTs || 0))
+    .slice(0, 50)
 })
 
 // 和子组件里的类型保持一致（可复制或抽到一个 shared types 文件里复用）
@@ -217,15 +235,27 @@ interface FixedItem {
 }
 interface HistoryRecord {
   id: string
+  type?: 'chat' | 'job'
   title: string
   subtitle?: string
   active?: boolean
   data?: unknown
+  sortTs?: number
 }
 
 // 点击历史记录
 function onHistoryClick(record: HistoryRecord) {
+  if (record.type === 'chat') {
+    chatStore.setCurrentSession(record.id)
+    router.push({ path: '/home', query: { session: record.id } })
+    return
+  }
   jobsStore.setCurrentJob(record.id)
+  const sourceSession = chatStore.getJobSourceSession(record.id)
+  if (sourceSession) {
+    router.push({ path: `/jobs/${record.id}`, query: { from: 'chat', session: sourceSession } })
+    return
+  }
   router.push(`/jobs/${record.id}`)
 }
 
@@ -233,6 +263,13 @@ function onHistoryClick(record: HistoryRecord) {
 async function onHistoryDelete(record: HistoryRecord) {
   const ok = typeof window === 'undefined' ? true : window.confirm('确定删除这条历史任务记录吗？')
   if (!ok) return
+  if (record.type === 'chat') {
+    await chatStore.deleteSession(record.id)
+    if (route.path === '/home' && String(route.query.session || '') === record.id) {
+      router.push({ path: '/home', query: { newChat: String(Date.now()) } })
+    }
+    return
+  }
   await jobsStore.deleteJob(record.id)
 }
 

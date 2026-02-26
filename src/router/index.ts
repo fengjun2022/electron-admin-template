@@ -11,7 +11,7 @@ const routes: Array<RouteRecordRaw> = [
       {
         path: '/home',
         name: 'Home',
-        meta: { title: 'AI任务中心',icon: ReaderOutline },
+        meta: { title: '小知AI',icon: ReaderOutline },
         component: () => import('@/views/home/index.vue'),
       },
       {
