@@ -27,7 +27,7 @@
         </div>
 
 <!--         设置抽屉-->
-        <NDrawer v-model:show="showSettingsDrawer" :width="320" placement="right">
+        <NDrawer v-model:show="showSettingsDrawer" :width="360" placement="right">
           <NDrawerContent
             title="设置"
             :body-style="{
@@ -48,6 +48,61 @@
                 <span class="text-base font-medium" :style="{ color: themeColors.text }">显示面包屑导航</span>
                 <NSwitch v-model:value="isBreadcrumbBarVisible" @update:value="globalStore.setBreadcrumbBarVisible" />
               </div>
+
+              <NDivider />
+
+              <div>
+                <div class="flex items-center justify-between mb-2">
+                  <span class="text-base font-medium" :style="{ color: themeColors.text }">对话参数</span>
+                  <NTag size="small" type="info">默认参数</NTag>
+                </div>
+                <div class="text-xs mb-3" :style="{ color: themeColors.textSecondary }">
+                  用于“超级小智”发起任务时的默认检索与处理参数（原高级参数）。
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                  <div>
+                    <div class="text-xs mb-1" :style="{ color: themeColors.textSecondary }">目标视频数</div>
+                    <NInputNumber v-model:value="chatTaskParams.topic_target_videos" :min="1" :max="8" class="w-full" />
+                  </div>
+                  <div>
+                    <div class="text-xs mb-1" :style="{ color: themeColors.textSecondary }">最大检索轮次</div>
+                    <NInputNumber v-model:value="chatTaskParams.topic_max_search_rounds" :min="1" :max="6" class="w-full" />
+                  </div>
+                  <div>
+                    <div class="text-xs mb-1" :style="{ color: themeColors.textSecondary }">每轮候选数</div>
+                    <NInputNumber v-model:value="chatTaskParams.search_limit" :min="3" :max="30" class="w-full" />
+                  </div>
+                  <div>
+                    <div class="text-xs mb-1" :style="{ color: themeColors.textSecondary }">搜索页数</div>
+                    <NInputNumber v-model:value="chatTaskParams.search_pages" :min="1" :max="5" class="w-full" />
+                  </div>
+                  <div>
+                    <div class="text-xs mb-1" :style="{ color: themeColors.textSecondary }">搜索超时(秒)</div>
+                    <NInputNumber v-model:value="chatTaskParams.search_timeout" :min="10" :max="180" class="w-full" />
+                  </div>
+                  <div>
+                    <div class="text-xs mb-1" :style="{ color: themeColors.textSecondary }">滚动轮次</div>
+                    <NInputNumber v-model:value="chatTaskParams.search_scroll_rounds" :min="0" :max="8" class="w-full" />
+                  </div>
+                </div>
+
+                <NSpace vertical size="small" class="mt-3">
+                  <NCheckbox v-model:checked="chatTaskParams.keep_intermediate_audio">保留中间音频</NCheckbox>
+                  <NCheckbox v-model:checked="chatTaskParams.playwright_headless">Playwright 无头</NCheckbox>
+                  <NCheckbox v-model:checked="chatTaskParams.search_headless">搜索无头</NCheckbox>
+                </NSpace>
+              </div>
+
+              <NDivider />
+
+              <div class="flex items-center justify-between">
+                <div>
+                  <div class="text-base font-medium" :style="{ color: themeColors.text }">Prompt 设置</div>
+                  <div class="text-xs" :style="{ color: themeColors.textSecondary }">笔记格式与风格要求</div>
+                </div>
+                <NButton size="small" @click="openPromptStudioFromDrawer">打开</NButton>
+              </div>
             </div>
           </NDrawerContent>
         </NDrawer>
@@ -59,12 +114,27 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, markRaw } from 'vue'
 import { storeToRefs } from 'pinia'
-import { NConfigProvider, NMessageProvider, NDrawer, NDrawerContent, NSwitch, darkTheme } from 'naive-ui'
+import {
+  NConfigProvider,
+  NMessageProvider,
+  NDrawer,
+  NDrawerContent,
+  NSwitch,
+  NInputNumber,
+  NCheckbox,
+  NSpace,
+  NDivider,
+  NButton,
+  NTag,
+  darkTheme,
+} from 'naive-ui'
 
-import { AddOutline, SettingsOutline, FolderOpenOutline } from '@vicons/ionicons5'
+import { AddOutline, SettingsOutline } from '@vicons/ionicons5'
+import { useRouter, useRoute } from 'vue-router'
 
 import { useGlobalStore } from '@/stores/global-store'
 import { getThemeColors } from '@/config/theme'
+import { useJobsStore } from '@/stores/modules/useJobsStore'
 
 // 导入布局组件
 import AppHeader from './components/AppHeader.vue'
@@ -73,7 +143,10 @@ import AppMain from './components/AppMain.vue'
 import ChatSiderBar from '@/layouts/components/ChatSiderBar.vue'
 
 const globalStore = useGlobalStore()
-const { isHeaderVisible, isBreadcrumbBarVisible, isDarkMode, showSettingsDrawer } = storeToRefs(globalStore)
+const { isHeaderVisible, isBreadcrumbBarVisible, isDarkMode, showSettingsDrawer, chatTaskParams } = storeToRefs(globalStore)
+const jobsStore = useJobsStore()
+const router = useRouter()
+const route = useRoute()
 
 // 计算当前主题颜色
 const themeColors = computed(() => {
@@ -106,36 +179,33 @@ const fixedItems = ref<FixedItem[]>([
     label: '新对话',
     icon: markRaw(AddOutline),
     cb: () => {
-      // 这里可以切路由或重置会话
-    },
-  },
-  {
-    key: 'open-folder',
-    label: '打开文件夹',
-    icon: markRaw(SettingsOutline),
-    cb: () => {
-      // 业务处理...
+      router.push('/home')
     },
   },
   {
     key: 'settings',
     label: '设置',
-    icon: markRaw(FolderOpenOutline),
+    icon: markRaw(SettingsOutline),
     cb: () => {
       showSettingsDrawer.value = true
     },
   },
 ])
 
-// 历史记录（供侧边栏展示）
-const historyRecords = ref<HistoryRecord[]>([
-  { id: 'r1', title: '和客户A的会议纪要', subtitle: '2025-09-01 14:30' },
-  { id: 'r2', title: '需求澄清：胸痛中心项目', subtitle: '2025-09-03 10:00' },
-  { id: 'r3', title: 'Bugfix 备忘', subtitle: '2025-09-05 21:10' },
-  { id: 'r3', title: '测试数据请在AppLayout中删除', subtitle: '2025-09-05 21:10' },
-])
-
-const activeHistoryTitle = computed(() => historyRecords.value.find((r) => r.active)?.title)
+// 历史记录（真实任务历史）
+const historyRecords = computed<HistoryRecord[]>(() => {
+  return jobsStore.recentJobIds.map((id) => {
+    const snap = jobsStore.jobs[id]?.snapshot
+    const stage = humanizeStage(String(snap?.stage || ''))
+    return {
+      id,
+      title: snap?.user_input || '点击查看任务详情',
+      subtitle: stage || statusLabel(String(snap?.status || '')),
+      active: route.path === `/jobs/${id}` || jobsStore.currentJobId === id,
+      data: snap,
+    }
+  })
+})
 
 // 和子组件里的类型保持一致（可复制或抽到一个 shared types 文件里复用）
 interface FixedItem {
@@ -155,18 +225,42 @@ interface HistoryRecord {
 
 // 点击历史记录
 function onHistoryClick(record: HistoryRecord) {
-  historyRecords.value = historyRecords.value.map((r) => ({
-    ...r,
-    active: r.id === record.id,
-  }))
-  // 先清除其他 active，再标记当前
-  console.log(record)
-  // 你的业务：比如跳转、加载会话...
+  jobsStore.setCurrentJob(record.id)
+  router.push(`/jobs/${record.id}`)
 }
 
 // 删除历史记录
-function onHistoryDelete(record: HistoryRecord) {
-  historyRecords.value = historyRecords.value.filter((r) => r.id !== record.id)
+async function onHistoryDelete(record: HistoryRecord) {
+  const ok = typeof window === 'undefined' ? true : window.confirm('确定删除这条历史任务记录吗？')
+  if (!ok) return
+  await jobsStore.deleteJob(record.id)
+}
+
+function statusLabel(status?: string) {
+  if (status === 'completed') return '已完成'
+  if (status === 'failed') return '失败'
+  if (status === 'running') return '运行中'
+  if (status === 'queued') return '排队中'
+  return '未开始'
+}
+
+function humanizeStage(stage: string) {
+  const s = (stage || '').trim()
+  if (!s) return ''
+  if (s.includes('search_round_')) return 'AI 检索与筛选中'
+  if (s === 'run_selected_video_pipelines') return '处理选中视频中'
+  if (s === 'extract_audio_url') return '提取音频链接'
+  if (s === 'download_audio') return '下载音频'
+  if (s === 'transcribe') return 'AI 转写语音'
+  if (s === 'generate_note') return 'AI 生成笔记'
+  if (s === 'merge_multi_notes') return 'AI 合并多份笔记'
+  if (s.includes('failed')) return '任务失败'
+  return s
+}
+
+function openPromptStudioFromDrawer() {
+  showSettingsDrawer.value = false
+  router.push('/prompt-studio')
 }
 </script>
 

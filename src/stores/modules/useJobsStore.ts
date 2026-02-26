@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { openJobEventsSSE } from '@/api/sse'
-import { buildJobEventsUrl, getJobApi, getJobNoteApi, getJobNoteLinkApi, createJobApi } from '@/api/jobs'
+import { buildJobEventsUrl, getJobApi, getJobNoteApi, getJobNoteLinkApi, createJobApi, deleteJobApi } from '@/api/jobs'
 import type { JobCreateRequest, JobSnapshot, JobEvent, JobNoteLinkResponse } from '@/api/types'
 
 type SseStatus = 'idle' | 'connecting' | 'connected' | 'disconnected'
@@ -152,9 +152,20 @@ export const useJobsStore = defineStore('jobs', {
       const jobUi = this.jobs[jobId]
       if (jobUi && jobUi.sseStatus === 'connected') jobUi.sseStatus = 'disconnected'
     },
+    async deleteJob(jobId: string) {
+      try {
+        await deleteJobApi(jobId)
+      } catch {
+        // If backend doesn't have this job (or delete fails), still clean local cache.
+      }
+      this.disconnectJobEvents(jobId)
+      delete this.jobs[jobId]
+      this.recentJobIds = this.recentJobIds.filter((id) => id !== jobId)
+      if (this.currentJobId === jobId) this.currentJobId = ''
+      return true
+    },
   },
   persist: {
     pick: ['currentJobId', 'recentJobIds'],
   },
 })
-

@@ -23,7 +23,7 @@ const routes: Array<RouteRecordRaw> = [
       {
         path: '/prompt-studio',
         name: 'PromptStudio',
-        meta: { title: 'Prompt设置', icon: CogOutline },
+        meta: { title: 'Prompt设置', icon: CogOutline, hideInMenu: true },
         component: () => import('@/views/prompt-studio/index.vue'),
       },
     ],

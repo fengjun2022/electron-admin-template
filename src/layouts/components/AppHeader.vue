@@ -32,16 +32,6 @@
           <span class="font-medium" :style="{ color: themeColors.text }">{{ userStore.userName }}</span>
         </div>
         <div class=" w-30 flex justify-between">
-          <NButton
-              text
-              @click="globalStore.changeAdminOrChat()"
-              :style="{ color: themeColors.textSecondary }"
-              class="hover:bg-opacity-20"
-              :title="adminOrChat ? '小知AI' : '控制台'"
-          >
-            <Icon icon="simple-icons:openai" width="17" height="17" />
-          </NButton>
-
           <!-- 主题切换按钮 -->
           <NButton
               text
@@ -91,14 +81,13 @@ import { useRouter } from 'vue-router'
 import { useGlobalStore } from '@/stores/global-store'
 import { useUserStore } from '@/stores/modules/useUserStore.ts'
 import { getThemeColors } from '@/config/theme'
-import { Icon } from '@iconify/vue'
 
 // Emits
 const emit = defineEmits(['open-settings'])
 
 const globalStore = useGlobalStore()
 const userStore = useUserStore()
-const { isHeaderVisible, isDarkMode, adminOrChat } = storeToRefs(globalStore)
+const { isHeaderVisible, isDarkMode } = storeToRefs(globalStore)
 const router = useRouter()
 
 // 计算当前主题颜色

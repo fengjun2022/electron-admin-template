@@ -8,20 +8,28 @@ export const useGlobalStore = defineStore('global', () => {
   // state
   const isSidebarMinimized = ref(true)
   const isHeaderVisible = ref(false)
-  const isBreadcrumbBarVisible = ref(true)
+  const isBreadcrumbBarVisible = ref(false)
   const isDarkMode = ref(false)
   const showSettingsDrawer = ref(false)
-  const adminOrChat = ref(true) // true=小知AI，false=控制台
+  const adminOrChat = ref(false) // false=小知AI(ChatSiderBar)，true=控制台
+  const chatTaskParams = ref({
+    search_limit: 12,
+    search_timeout: 30,
+    search_pages: 2,
+    search_scroll_rounds: 2,
+    topic_target_videos: 3,
+    topic_max_search_rounds: 3,
+    keep_intermediate_audio: false,
+    playwright_headless: true,
+    search_headless: true,
+  })
 
   // 下拉菜单
   const userDropdownOptions = computed(() => [
     {
-      label: adminOrChat.value ? '小知AI' : '控制台',
-      key: 'toggle-admin-chat',
-      cb: () => {
-        adminOrChat.value = !adminOrChat.value
-        // 不必手动写 localStorage，watch 会自动持久化
-      },
+      label: 'Prompt设置',
+      key: 'prompt-studio',
+      cb: () => router.push('/prompt-studio'),
     },
     {
       label: isDarkMode.value ? '切换到日间模式' : '切换到夜间模式',
@@ -118,10 +126,16 @@ export const useGlobalStore = defineStore('global', () => {
       isBreadcrumbBarVisible.value = savedBreadcrumbBarVisible === 'true'
     }
 
-    // 小知AI / 控制台
-    const savedAdminOrChat = localStorage.getItem('adminOrChat')
-    if (savedAdminOrChat !== null) {
-      adminOrChat.value = savedAdminOrChat === 'true'
+    // 固定为小知AI模式（隐藏切换回控制台入口）
+    adminOrChat.value = false
+
+    const savedChatTaskParams = localStorage.getItem('chatTaskParams')
+    if (savedChatTaskParams) {
+      try {
+        chatTaskParams.value = { ...chatTaskParams.value, ...JSON.parse(savedChatTaskParams) }
+      } catch {
+        // ignore invalid local cache
+      }
     }
   }
 
@@ -146,6 +160,15 @@ export const useGlobalStore = defineStore('global', () => {
     localStorage.setItem('adminOrChat', val.toString())
   })
 
+  watch(
+    chatTaskParams,
+    (val) => {
+      if (typeof window === 'undefined') return
+      localStorage.setItem('chatTaskParams', JSON.stringify(val))
+    },
+    { deep: true },
+  )
+
   // （可选）是否要记住侧边栏收起状态：
   // watch(isSidebarMinimized, (val) => {
   //   if (typeof window === 'undefined') return
@@ -163,6 +186,7 @@ export const useGlobalStore = defineStore('global', () => {
     isDarkMode,
     showSettingsDrawer,
     adminOrChat,
+    chatTaskParams,
     userDropdownOptions,
     // getters
     themeClass,

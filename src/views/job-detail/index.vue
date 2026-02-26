@@ -5,9 +5,9 @@
         <n-space justify="space-between" align="center">
           <n-space align="center">
             <n-tag :type="statusTagType(job?.status)">
-              {{ job?.status || 'unknown' }}
+              {{ statusLabel(job?.status) }}
             </n-tag>
-            <n-text depth="3">{{ job?.kind || 'unknown' }}</n-text>
+            <n-tag type="info" size="small">{{ kindLabel(job?.kind) }}</n-tag>
           </n-space>
           <n-space>
             <n-button @click="refreshJob" :loading="loadingJob">刷新</n-button>
@@ -17,42 +17,120 @@
         </n-space>
 
         <n-divider />
-        <n-space vertical size="small">
-          <div><strong>输入：</strong>{{ job?.user_input || '-' }}</div>
-          <div><strong>当前阶段：</strong>{{ job?.stage || '-' }}</div>
-          <div><strong>阶段说明：</strong>{{ job?.detail || '-' }}</div>
-          <div><strong>SSE：</strong>{{ jobState?.sseStatus || 'idle' }}</div>
-          <div v-if="job?.error"><strong>错误：</strong><span class="text-red-500">{{ job.error }}</span></div>
+        <n-grid :cols="3" x-gap="12" y-gap="12" class="mb-4">
+          <n-gi>
+            <div class="rounded-lg p-3 bg-blue-500/10 border border-blue-400/20">
+              <div class="text-xs opacity-70 mb-1">任务状态</div>
+              <div class="flex items-center gap-2">
+                <span
+                  class="inline-block w-2.5 h-2.5 rounded-full"
+                  :class="{
+                    'bg-green-400': job?.status === 'running' || job?.status === 'completed',
+                    'bg-blue-400': job?.status === 'queued' || !job?.status,
+                    'bg-red-400': job?.status === 'failed',
+                  }"
+                />
+                <span class="font-semibold">{{ statusLabel(job?.status) }}</span>
+              </div>
+              <div class="text-xs opacity-70 mt-1">{{ statusFriendlyHint }}</div>
+            </div>
+          </n-gi>
+          <n-gi>
+            <div class="rounded-lg p-3 bg-green-500/10 border border-green-400/20">
+              <div class="text-xs opacity-70 mb-1">当前步骤</div>
+              <div class="font-semibold">{{ displayStage }}</div>
+              <div class="text-xs opacity-70 mt-1">{{ stageFriendlyHint }}</div>
+            </div>
+          </n-gi>
+          <n-gi>
+            <div class="rounded-lg p-3 bg-red-500/10 border border-red-400/20">
+              <div class="text-xs opacity-70 mb-1">实时连接</div>
+              <div class="flex items-center gap-2">
+                <span
+                  class="inline-block w-2.5 h-2.5 rounded-full"
+                  :class="{
+                    'bg-green-400': jobState?.sseStatus === 'connected',
+                    'bg-blue-400': jobState?.sseStatus === 'connecting' || !jobState?.sseStatus || jobState?.sseStatus === 'idle',
+                    'bg-red-400': jobState?.sseStatus === 'disconnected',
+                  }"
+                />
+                <span class="font-semibold">{{ sseStatusLabel }}</span>
+              </div>
+              <div class="text-xs opacity-70 mt-1">{{ sseHumanExplanation }}</div>
+            </div>
+          </n-gi>
+        </n-grid>
+
+        <n-space vertical size="small" class="text-base">
+          <div><strong>你的需求：</strong>{{ job?.user_input || '-' }}</div>
+          <div>
+            <strong>当前进度：</strong>
+            <span>{{ displayStage }}</span>
+          </div>
+          <div>
+            <strong>AI 正在做什么：</strong>
+            <span>{{ displayDetail }}</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <strong>实时连接：</strong>
+            <n-tag :type="sseTagType" size="small">{{ sseStatusLabel }}</n-tag>
+            <span class="text-xs opacity-70">{{ sseStatusHint }}</span>
+          </div>
+          <n-alert v-if="job?.error" type="error" :show-icon="false">
+            {{ humanizeError(job.error) }}
+          </n-alert>
         </n-space>
       </n-card>
 
       <n-grid :cols="2" x-gap="12" y-gap="12">
         <n-gi>
           <n-card title="AI 过程日志" :bordered="false">
-            <template #header-extra>
-              <n-tag size="small">{{ (jobState?.logs || []).length }} 条</n-tag>
-            </template>
+
             <div class="h-[420px] overflow-auto rounded-md p-3 bg-black/10 dark:bg-white/5">
-              <template v-if="jobState?.logs?.length">
+              <template v-if="displayLogs.length">
                 <div
-                  v-for="(log, idx) in jobState.logs"
+                  v-for="(log, idx) in displayLogs"
                   :key="idx"
-                  class="text-xs font-mono leading-6 border-b border-black/5 dark:border-white/5 py-1"
+                  class="text-sm leading-6 border-b border-black/5 dark:border-white/5 py-2"
                 >
-                  <span class="opacity-60 mr-2">{{ log.ts || '--:--:--' }}</span>
-                  <span>{{ log.message }}</span>
+                  <div class="flex items-start gap-2">
+                    <span
+                      class="mt-2 inline-block w-2 h-2 rounded-full shrink-0"
+                      :class="{
+                        'bg-blue-400': log.tone === 'info',
+                        'bg-green-400': log.tone === 'success',
+                        'bg-red-400': log.tone === 'error',
+                      }"
+                    />
+                    <div class="min-w-0 flex-1">
+                      <div class="text-xs opacity-60">{{ log.ts || '--:--:--' }}</div>
+                      <div class="flex items-center gap-2 mb-1">
+                        <n-tag size="tiny" :type="logTagType(log.tone)">
+                          {{ logLabel(log.tone) }}
+                        </n-tag>
+                      </div>
+                      <div class="whitespace-pre-wrap break-words">{{ log.message }}</div>
+                    </div>
+                  </div>
                 </div>
               </template>
-              <n-empty v-else description="等待日志..." />
+              <n-empty v-else description="AI 正在准备中，稍后会显示过程说明..." />
             </div>
           </n-card>
         </n-gi>
 
         <n-gi>
-          <n-card title="任务结构化信息" :bordered="false">
+          <n-card title="任务进度与结果" :bordered="false">
             <n-tabs type="line" animated>
-              <n-tab-pane name="summary" tab="快照">
-                <pre class="text-xs whitespace-pre-wrap break-all">{{ prettyJob }}</pre>
+              <n-tab-pane name="summary" tab="任务摘要">
+                <n-space vertical size="small">
+                  <div><strong>任务状态：</strong>{{ statusLabel(job?.status) }}</div>
+                  <div><strong>任务类型：</strong>{{ kindLabel(job?.kind) }}</div>
+                  <div><strong>阶段：</strong>{{ displayStage }}</div>
+                  <div><strong>说明：</strong>{{ displayDetail }}</div>
+                  <div v-if="videoRuns.length"><strong>已处理视频：</strong>{{ videoRuns.length }} 个</div>
+                  <div v-if="noteLink"><strong>结果文件：</strong>{{ noteLink.file_name }}</div>
+                </n-space>
               </n-tab-pane>
               <n-tab-pane name="videos" tab="视频处理">
                 <template v-if="videoRuns.length">
@@ -61,11 +139,11 @@
                       <n-space vertical size="small" class="w-full">
                         <n-space justify="space-between">
                           <div class="font-medium truncate max-w-[420px]">{{ v.title || v.bili_url }}</div>
-                          <n-tag size="small" :type="statusTagType(v.status)">{{ v.status }}</n-tag>
+                          <n-tag size="small" :type="statusTagType(v.status)">{{ statusLabel(v.status) }}</n-tag>
                         </n-space>
                         <div class="text-xs opacity-70 break-all">{{ v.bili_url }}</div>
                         <div v-if="v.pipeline_result?.note_md" class="text-xs opacity-70">
-                          中间笔记：{{ v.pipeline_result.note_md }}
+                          中间笔记已生成（信息保留版）
                         </div>
                         <div v-if="v.error" class="text-xs text-red-500">{{ v.error }}</div>
                       </n-space>
@@ -74,9 +152,40 @@
                 </template>
                 <n-empty v-else description="该任务暂无视频处理明细" />
               </n-tab-pane>
-              <n-tab-pane name="events" tab="事件流">
+              <n-tab-pane name="events" tab="实时播报">
+                <div class="text-xs opacity-70 mb-2">
+                  这里显示的是“实时连接通道”推送的进度播报，可以理解为系统在边做边汇报。
+                </div>
+                <div class="h-[320px] overflow-auto rounded-md p-3 bg-black/10 dark:bg-white/5">
+                  <template v-if="displayEvents.length">
+                    <div
+                      v-for="(ev, idx) in displayEvents"
+                      :key="idx"
+                      class="py-2 border-b border-black/5 dark:border-white/5"
+                    >
+                      <n-space justify="space-between" align="center">
+                        <n-tag size="small" :type="eventTagType(ev.type)">{{ eventLabel(ev.type) }}</n-tag>
+                        <span class="text-xs opacity-60">{{ ev.ts || '--:--:--' }}</span>
+                      </n-space>
+                      <div class="text-sm mt-1 whitespace-pre-wrap break-words">{{ ev.text }}</div>
+                    </div>
+                  </template>
+                  <n-empty v-else description="等待实时播报事件..." />
+                </div>
+              </n-tab-pane>
+              <n-tab-pane name="debug" tab="开发者JSON（高级）">
                 <div class="h-[320px] overflow-auto">
-                  <pre class="text-xs whitespace-pre-wrap break-all">{{ prettyEvents }}</pre>
+                  <n-alert type="info" :show-icon="false" class="mb-3">
+                    这是给开发排查问题用的原始数据，一般用户无需查看。
+                  </n-alert>
+                  <n-tabs type="segment" size="small">
+                    <n-tab-pane name="job-json" tab="任务原始数据">
+                      <pre class="text-xs whitespace-pre-wrap break-all">{{ prettyJob }}</pre>
+                    </n-tab-pane>
+                    <n-tab-pane name="event-json" tab="事件原始数据">
+                      <pre class="text-xs whitespace-pre-wrap break-all">{{ prettyEvents }}</pre>
+                    </n-tab-pane>
+                  </n-tabs>
                 </div>
               </n-tab-pane>
             </n-tabs>
@@ -116,6 +225,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
+  NAlert,
   NButton,
   NCard,
   NDivider,
@@ -167,7 +277,85 @@ const noteDownloadFullUrl = computed(() => {
   return buildJobNoteDownloadUrl(jobId.value)
 })
 
-const sseBtnText = computed(() => (jobState.value?.sseStatus === 'connected' ? '断开SSE' : '连接SSE'))
+const sseBtnText = computed(() => (jobState.value?.sseStatus === 'connected' ? '暂停实时连接' : '开启实时连接'))
+
+const displayStage = computed(() => humanizeStage(job.value?.stage || ''))
+const displayDetail = computed(() => humanizeDetail(job.value?.detail || '', job.value?.stage || ''))
+
+const sseTagType = computed(() => {
+  const s = jobState.value?.sseStatus || 'idle'
+  if (s === 'connected') return 'success'
+  if (s === 'connecting') return 'info'
+  if (s === 'disconnected') return 'error'
+  return 'default'
+})
+
+const sseStatusLabel = computed(() => {
+  const s = jobState.value?.sseStatus || 'idle'
+  if (s === 'connected') return '已连接'
+  if (s === 'connecting') return '连接中'
+  if (s === 'disconnected') return '已断开'
+  return '未开启'
+})
+
+const sseStatusHint = computed(() => {
+  const s = jobState.value?.sseStatus || 'idle'
+  if (s === 'connected') return '任务进度会实时自动更新'
+  if (s === 'connecting') return '正在连接实时进度通道'
+  if (s === 'disconnected') return '可点击“开启实时连接”继续查看'
+  return '点击“开启实时连接”查看实时进度'
+})
+
+const sseHumanExplanation = computed(() => {
+  const s = jobState.value?.sseStatus || 'idle'
+  if (s === 'connected') return '系统会实时播报处理进度（绿色表示正常）'
+  if (s === 'connecting') return '正在建立实时播报通道（蓝色表示处理中）'
+  if (s === 'disconnected') return '实时播报已断开，可重新连接（红色提示）'
+  return '未开启实时播报，可手动开启'
+})
+
+const statusFriendlyHint = computed(() => {
+  const s = job.value?.status
+  if (s === 'running') return '任务正在执行中，系统会持续更新进度'
+  if (s === 'queued') return '任务已进入队列，马上开始'
+  if (s === 'completed') return '任务已完成，可以查看并下载笔记'
+  if (s === 'failed') return '任务中途失败，可根据提示检查配置后重试'
+  return '等待任务状态更新'
+})
+
+const stageFriendlyHint = computed(() => {
+  const stage = String(job.value?.stage || '')
+  if (stage.includes('search')) return 'AI 正在找更合适的视频资料'
+  if (stage.includes('merge')) return 'AI 正在把多份笔记归纳成一份更清晰的总结'
+  if (stage.includes('transcribe')) return '系统正在把语音内容转成文字'
+  if (stage.includes('generate')) return 'AI 正在整理知识点并生成笔记'
+  if (stage.includes('extract_audio')) return '系统正在准备音频素材'
+  return '系统正在推进当前步骤'
+})
+
+const displayLogs = computed(() => {
+  const logs = jobState.value?.logs || []
+  return logs.map((x) => ({
+    ts: x.ts,
+    message: humanizeLogMessage(x.message || ''),
+    tone: inferLogTone(x.message || ''),
+  }))
+})
+
+const displayEvents = computed(() => {
+  const events = (jobState.value?.events || []) as Array<any>
+  return events
+    .slice(-80)
+    .map((ev) => {
+      const type = String(ev?.type || 'message')
+      const data = ev?.data ?? ev
+      return {
+        type,
+        ts: ev?.ts || data?.ts || '',
+        text: humanizeEvent(type, data),
+      }
+    })
+})
 
 async function refreshJob() {
   if (!jobId.value) return
@@ -223,8 +411,158 @@ function goHome() {
 function statusTagType(status?: string) {
   if (status === 'completed') return 'success'
   if (status === 'failed') return 'error'
-  if (status === 'running') return 'warning'
+  if (status === 'running') return 'success' // 用户要求：运行中显示绿色
+  if (status === 'queued') return 'info'
   return 'default'
+}
+
+function statusLabel(status?: string) {
+  if (status === 'completed') return '已完成'
+  if (status === 'failed') return '失败'
+  if (status === 'running') return '运行中'
+  if (status === 'queued') return '排队中'
+  return status || '未知'
+}
+
+function kindLabel(kind?: string) {
+  if (kind === 'topic') return '主题检索任务'
+  if (kind === 'single_video') return '单视频任务'
+  return '任务'
+}
+
+function humanizeStage(stage: string) {
+  const s = (stage || '').trim()
+  if (!s) return '等待任务开始'
+  if (s.includes('search_round_')) return 'AI 正在检索并评估候选视频'
+  if (s === 'run_selected_video_pipelines') return 'AI 正在逐个处理已选视频'
+  if (s === 'merge_multi_notes') return 'AI 正在合并多份中间笔记（归纳总结）'
+  if (s === 'extract_audio_url') return '正在提取音频链接'
+  if (s === 'download_audio') return '正在下载音频'
+  if (s === 'convert_mp3') return '正在转换音频格式'
+  if (s === 'demucs') return '正在分离人声'
+  if (s === 'transcribe') return '正在语音转文字'
+  if (s === 'generate_note') return 'AI 正在生成笔记'
+  if (s === 'cleanup') return '正在清理中间文件'
+  if (s === 'done') return '任务已完成'
+  if (s.includes('failed')) return '任务执行失败'
+  return s
+}
+
+function humanizeDetail(detail: string, stage: string) {
+  const d = (detail || '').trim()
+  if (!d) return '系统正在处理，请稍候'
+  if (d.includes('Error code: 401 - Invalid token')) {
+    return '模型服务认证失败（大模型 API Key 无效或未配置）'
+  }
+  if ((stage || '').includes('search_round_')) {
+    return d.replace(/^search_round_\d+:\s*/i, '')
+  }
+  return d
+}
+
+function humanizeError(err: string) {
+  if (!err) return ''
+  if (err.includes('Invalid token')) {
+    return '模型服务认证失败：请检查 OPENAI_API_KEY / OPENAI_BASE_URL 配置是否正确。'
+  }
+  return err
+}
+
+function shortenUrl(text: string) {
+  return text.replace(/https?:\/\/[^\s]+/g, (m) => {
+    try {
+      const u = new URL(m)
+      return `${u.origin}${u.pathname}${u.search ? '（已省略参数）' : ''}`
+    } catch {
+      return '链接（已省略）'
+    }
+  })
+}
+
+function humanizeLogMessage(message: string) {
+  let m = (message || '').trim()
+  if (!m) return '系统处理中...'
+  m = shortenUrl(m)
+  m = m
+    .replace(/^任务已创建\s*\(queued\)/, '任务已创建，正在排队准备执行')
+    .replace(/^Playwright 打开 B站搜索页[:：]?/i, '正在打开 B站搜索页面')
+    .replace(/^抓取搜索结果[:：]?/i, '正在抓取搜索结果')
+    .replace(/^第 \d+ 页抓取候选[:：]?/i, (s) => s.replace('抓取候选', '已抓取候选'))
+    .replace(/^AI 粗筛完成[:：]?/i, 'AI 已完成初步筛选：')
+    .replace(/^AI 当前选择/i, 'AI 已选出一批更匹配的视频：')
+    .replace(/^开始处理选中视频/i, '开始处理已选视频')
+    .replace(/^已收集中间笔记/i, '已完成一份中间笔记（信息保留版）')
+    .replace(/^开始合并多份中间笔记/i, 'AI 正在合并多份中间笔记（生成最终归纳版）')
+    .replace(/^开始调用模型合并中间笔记/i, 'AI 正在汇总和归纳多份笔记（此步骤可能稍慢）')
+    .replace(/^模型已返回主题合并笔记结果/i, 'AI 已完成多笔记合并，正在整理格式')
+    .replace(/^调用模型生成 Markdown 笔记/i, 'AI 正在生成 Markdown 笔记')
+    .replace(/^笔记已写入/i, '笔记已保存到本地')
+    .replace(/^已清理中间音频文件/i, '中间音频文件已清理（节省空间）')
+    .replace(/^转写文本长度[:：]?\s*(\d+)\s*字符/i, '语音已转文字（约 $1 字）')
+    .replace(/^已获取音频主链接/i, '已获取音频下载链接')
+  return m
+}
+
+function inferLogTone(message: string): 'info' | 'success' | 'error' {
+  const m = (message || '').toLowerCase()
+  if (/失败|error|invalid token|异常/.test(m)) return 'error'
+  if (/完成|已保存|已清理|已获取|已收集|success/.test(m)) return 'success'
+  return 'info'
+}
+
+function logTagType(tone: 'info' | 'success' | 'error') {
+  if (tone === 'success') return 'success'
+  if (tone === 'error') return 'error'
+  return 'info'
+}
+
+function logLabel(tone: 'info' | 'success' | 'error') {
+  if (tone === 'success') return '已完成'
+  if (tone === 'error') return '需要处理'
+  return '处理中'
+}
+
+function eventTagType(type: string) {
+  if (type === 'failed') return 'error'
+  if (type === 'completed') return 'success'
+  if (type === 'status') return 'info'
+  if (type === 'log') return 'default'
+  if (type === 'heartbeat') return 'success'
+  return 'default'
+}
+
+function eventLabel(type: string) {
+  const t = String(type || '')
+  if (t === 'snapshot') return '快照'
+  if (t === 'status') return '进度更新'
+  if (t === 'log') return '过程说明'
+  if (t === 'completed') return '已完成'
+  if (t === 'failed') return '失败'
+  if (t === 'heartbeat') return '连接心跳'
+  if (t === 'job_created') return '任务创建'
+  return t || '事件'
+}
+
+function humanizeEvent(type: string, data: any) {
+  if (type === 'status') {
+    return `${humanizeStage(String(data?.stage || ''))}：${humanizeDetail(String(data?.detail || ''), String(data?.stage || ''))}`
+  }
+  if (type === 'log') {
+    return humanizeLogMessage(String(data?.message || ''))
+  }
+  if (type === 'completed') {
+    return '任务处理完成，结果已生成。'
+  }
+  if (type === 'failed') {
+    return humanizeError(String(data?.error || '任务执行失败'))
+  }
+  if (type === 'heartbeat') {
+    return '实时连接正常'
+  }
+  if (type === 'job_created') {
+    return '任务已创建，等待系统开始处理'
+  }
+  return JSON.stringify(data, null, 2)
 }
 
 async function bootstrap() {

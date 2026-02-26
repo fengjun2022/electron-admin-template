@@ -30,6 +30,13 @@ export function getJobNoteLinkApi(jobId: string) {
   })
 }
 
+export function deleteJobApi(jobId: string) {
+  return apiRequest<{ ok: boolean; job_id: string }>(`/jobs/${jobId}`, {
+    method: 'DELETE',
+    auth: true,
+  })
+}
+
 export function buildJobEventsUrl(jobId: string) {
   return buildApiUrl(`/jobs/${jobId}/events`)
 }
@@ -37,4 +44,3 @@ export function buildJobEventsUrl(jobId: string) {
 export function buildJobNoteDownloadUrl(jobId: string) {
   return buildApiUrl(`/jobs/${jobId}/note/download`)
 }
-
