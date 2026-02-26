@@ -1,33 +1,29 @@
 <template>
   <div class="p-2 h-full overflow-hidden">
     <n-grid :cols="24" x-gap="12" class="h-full">
-      <n-gi :span="18" class="h-full">
-        <n-card :bordered="false" class="h-full right-rail-card">
+      <n-gi :span="showTaskRail ? 18 : 24" class="h-full chat-pane-gi">
+        <n-card :bordered="false" class="h-full">
           <div class="h-full flex flex-col">
-            <div class="px-2 pb-2 grid grid-cols-[1fr_auto] items-center gap-3">
-              <div class="flex items-center">
-                <div class="text-sm opacity-80">对话模式</div>
+            <div class="px-2 pb-2 flex items-center justify-between gap-3">
+              <div class="flex items-center gap-3 min-w-0">
+
+                <n-dropdown trigger="click" :options="modelDropdownOptions" @select="handleModelSelect">
+                  <button type="button" class="model-inline-trigger" :disabled="modelsLoading">
+                    <span class="model-inline-trigger__label">模型</span>
+                    <span class="model-inline-trigger__value">{{ selectedModelDisplayName }}</span>
+                    <n-icon :component="ChevronDownOutline" size="14" class="opacity-60" />
+                  </button>
+                </n-dropdown>
               </div>
-              <div class="flex items-center justify-end gap-2">
-                <span class="text-xs opacity-60">模型</span>
-                <n-select
-                  v-model:value="selectedModel"
-                  size="small"
-                  style="width: 280px"
-                  :options="modelOptions"
-                  :loading="modelsLoading"
-                  clearable
-                  placeholder="默认模型"
-                />
-              </div>
+              <div class="text-xs opacity-60 shrink-0">{{ modelsLoading ? '模型加载中...' : '' }}</div>
             </div>
 
             <div ref="messagesContainerRef" class="flex-1 min-h-0 overflow-auto px-1 py-1">
               <div class="space-y-4">
                 <div v-if="messages.length === 0" class="h-full min-h-[220px] flex items-center justify-center">
-                  <div class="text-center max-w-xl px-6">
-                    <div class="text-lg font-semibold mb-2">像 ChatGPT 一样先聊天，再决定是否创建任务</div>
-                    <div class="text-sm opacity-70 leading-6">
+                  <div class="max-w-xl px-6">
+                    <div class="text-lg font-semibold mb-2 text-center">我是小知,你可以和我对话或让我为你创建一个知识检索任务</div>
+                    <div class="text-sm opacity-70 leading-6 text-left">
                       你可以先问功能、问概念、问思路。需要我去 B 站检索并整理笔记时，再打开“知识检索”发送即可。
                     </div>
                   </div>
@@ -76,7 +72,6 @@
                       >
                         查看任务详情
                       </n-button>
-                      <span v-if="msg.toolDecisionReason" class="opacity-65">意图判断：{{ msg.toolDecisionReason }}</span>
                     </div>
                   </div>
 
@@ -140,8 +135,9 @@
         </n-card>
       </n-gi>
 
-      <n-gi :span="6" class="h-full">
-        <n-card :bordered="false" class="h-full">
+      <n-gi v-if="showTaskRail" :span="6" class="h-full task-rail-gi">
+        <transition name="task-rail-drawer" appear>
+          <n-card v-if="showTaskRail" :bordered="false" class="h-full right-rail-card">
           <template #header>
             <div class="flex items-center justify-between">
               <span class="font-semibold">当前任务进度</span>
@@ -243,7 +239,8 @@
             </div>
           </template>
           <n-empty v-else description="先在中间聊天；开启“知识检索”并发送后，才可能创建任务" />
-        </n-card>
+          </n-card>
+        </transition>
       </n-gi>
     </n-grid>
   </div>
@@ -252,12 +249,12 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { NButton, NCard, NEmpty, NGi, NGrid, NIcon, NInput, NSelect, NSpace, NTag, useMessage } from 'naive-ui'
-import { ArrowUpOutline } from '@vicons/ionicons5'
+import { NButton, NCard, NDropdown, NEmpty, NGi, NGrid, NIcon, NInput, NSpace, NTag, useMessage } from 'naive-ui'
+import { ArrowUpOutline, ChevronDownOutline } from '@vicons/ionicons5'
 import { useJobsStore } from '@/stores/modules/useJobsStore'
 import { useAuthStore } from '@/stores/modules/useAuthStore'
 import { useGlobalStore } from '@/stores/global-store'
-import { createChatSessionApi, listChatModelsApi, sendChatMessageApi } from '@/api/chat'
+import { createChatSessionApi, listChatModelsApi, sendChatMessageStreamApi } from '@/api/chat'
 import { buildJobNoteDownloadUrl } from '@/api/jobs'
 import type { ChatMessage, ChatModelItem, JobCreateResponse } from '@/api/types'
 
@@ -316,12 +313,21 @@ const currentSseColorClass = computed(() => {
   return 'opacity-70'
 })
 
-const modelOptions = computed(() =>
+const modelDropdownOptions = computed(() =>
   chatModels.value.map((m) => ({
     label: `${m.display_name || m.model_name}${m.provider ? ` · ${m.provider}` : ''}`,
-    value: m.model_name,
+    key: m.model_name,
   })),
 )
+
+const selectedModelDisplayName = computed(() => {
+  if (modelsLoading.value) return '加载中...'
+  if (!selectedModel.value) return '默认模型'
+  const model = chatModels.value.find((m) => m.model_name === selectedModel.value)
+  return model?.display_name || model?.model_name || selectedModel.value
+})
+
+const showTaskRail = computed(() => knowledgeRetrievalEnabled.value)
 
 const currentSidebarLogs = computed(() => {
   const logs = currentJobState.value?.logs || []
@@ -410,6 +416,10 @@ async function loadChatModels() {
   }
 }
 
+function handleModelSelect(key: string | number) {
+  selectedModel.value = String(key || '')
+}
+
 function handleNewChatRouteSignal(token: string) {
   if (!token || token === routeNewChatToken.value) return
   routeNewChatToken.value = token
@@ -417,10 +427,18 @@ function handleNewChatRouteSignal(token: string) {
 }
 
 function startNewConversation() {
+  resetCurrentTaskState()
   chatSessionUuid.value = ''
   messages.value = []
   userInput.value = ''
   knowledgeRetrievalEnabled.value = false
+}
+
+function resetCurrentTaskState() {
+  const currentId = jobsStore.currentJobId
+  if (currentId) jobsStore.disconnectJobEvents(currentId)
+  jobsStore.currentJobId = ''
+  loadingCurrentJobNote.value = false
 }
 
 async function ensureChatSession() {
@@ -469,37 +487,82 @@ async function sendMessage() {
 
   try {
     const sessionUuid = await ensureChatSession()
-    const res = await sendChatMessageApi(sessionUuid, {
-      content: text,
-      model_name: selectedModel.value || '',
-      auto_task: knowledgeRetrievalEnabled.value,
-    })
+    let taskInfo: JobCreateResponse | null = null
+    let toolDecisionReason = ''
+    let shouldCreateJob = false
+    let taskHandled = false
+    let gotAnyDelta = false
+    let savedAssistantContent = ''
 
-    const idx = messages.value.findIndex((m) => m.localId === pendingAssistant.localId)
-    if (idx >= 0) messages.value.splice(idx, 1)
-    mapAssistantMessage(res.assistant_message, res.task, res.tool_decision)
+    await sendChatMessageStreamApi(
+      sessionUuid,
+      {
+        content: text,
+        model_name: selectedModel.value || '',
+        auto_task: knowledgeRetrievalEnabled.value,
+      },
+      {
+        onMeta: (meta) => {
+          taskInfo = (meta?.task as JobCreateResponse | null) || null
+          shouldCreateJob = Boolean(meta?.tool_decision?.should_create_job)
+          toolDecisionReason = String(meta?.tool_decision?.reason || '').trim()
+          if (taskInfo?.job_id && !taskHandled) {
+            taskHandled = true
+            pendingAssistant.task = taskInfo
+            pendingAssistant.toolDecisionReason = toolDecisionReason || undefined
+            void (async () => {
+              jobsStore.setCurrentJob(taskInfo!.job_id)
+              try {
+                await jobsStore.fetchJob(taskInfo!.job_id)
+              } catch {
+                // ignore
+              }
+              jobsStore.connectJobEvents(taskInfo!.job_id)
+              message.success('已创建任务，并保留在当前对话页继续聊天')
+            })()
+          }
+        },
+        onStart: () => {
+          pendingAssistant.pending = false
+          if (!pendingAssistant.content) pendingAssistant.content = ''
+        },
+        onDelta: (deltaText) => {
+          gotAnyDelta = gotAnyDelta || !!deltaText
+          pendingAssistant.pending = false
+          pendingAssistant.content = `${pendingAssistant.content || ''}${deltaText || ''}`
+        },
+        onDone: (doneData) => {
+          pendingAssistant.pending = false
+          if (!gotAnyDelta && String(doneData?.text || '')) {
+            pendingAssistant.content = String(doneData.text)
+          }
+          if (knowledgeRetrievalEnabled.value && !taskInfo && !shouldCreateJob) {
+            message.info('本次未创建任务：AI 判断为普通对话/咨询')
+          }
+        },
+        onSaved: (savedData) => {
+          const msg = (savedData?.assistant_message || null) as ChatMessage | null
+          savedAssistantContent = String(msg?.content || '')
+          if (msg?.meta?.tool_decision?.reason && !toolDecisionReason) {
+            toolDecisionReason = String(msg.meta.tool_decision.reason || '')
+            pendingAssistant.toolDecisionReason = toolDecisionReason || undefined
+          }
+          if (msg?.meta?.task && !pendingAssistant.task) {
+            pendingAssistant.task = msg.meta.task as JobCreateResponse
+          }
+        },
+      },
+    )
 
-    if (res.task?.job_id) {
-      jobsStore.setCurrentJob(res.task.job_id)
-      try {
-        await jobsStore.fetchJob(res.task.job_id)
-      } catch {
-        // ignore
-      }
-      jobsStore.connectJobEvents(res.task.job_id)
-      message.success('已创建任务，并保留在当前对话页继续聊天')
-    } else if (knowledgeRetrievalEnabled.value && res.tool_decision && !res.tool_decision.should_create_job) {
-      message.info('本次未创建任务：AI 判断为普通对话/咨询')
+    pendingAssistant.pending = false
+    pendingAssistant.toolDecisionReason = toolDecisionReason || pendingAssistant.toolDecisionReason
+
+    if (!String(pendingAssistant.content || '').trim()) {
+      pendingAssistant.content = savedAssistantContent || '我已收到。'
     }
   } catch (e: any) {
-    const idx = messages.value.findIndex((m) => m.localId === pendingAssistant.localId)
-    if (idx >= 0) {
-      messages.value.splice(idx, 1, {
-        ...pendingAssistant,
-        pending: false,
-        content: `发送失败：${e?.message || '未知错误'}`,
-      })
-    }
+    pendingAssistant.pending = false
+    pendingAssistant.content = `发送失败：${e?.message || '未知错误'}`
     message.error(e?.message || '发送失败')
   } finally {
     sending.value = false
@@ -640,6 +703,79 @@ function humanizeSidebarLog(text: string) {
   background: rgba(31, 41, 55, 0.95);
   color: #e5e7eb;
   border-color: rgba(148, 163, 184, 0.25);
+}
+
+.chat-pane-gi {
+  transition: width 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.task-rail-gi {
+  transform-origin: right center;
+}
+
+.task-rail-drawer-enter-active,
+.task-rail-drawer-leave-active {
+  transition:
+    opacity 0.24s ease,
+    transform 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+    filter 0.28s ease;
+}
+
+.task-rail-drawer-enter-from,
+.task-rail-drawer-leave-to {
+  opacity: 0;
+  transform: translateX(20px) scale(0.985);
+  filter: blur(2px);
+}
+
+.task-rail-drawer-enter-to,
+.task-rail-drawer-leave-from {
+  opacity: 1;
+  transform: translateX(0) scale(1);
+  filter: blur(0);
+}
+
+.model-inline-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: inherit;
+  transition: all 0.18s ease;
+  max-width: 420px;
+}
+
+.model-inline-trigger:hover:not(:disabled) {
+  background: rgba(148, 163, 184, 0.08);
+  border-color: rgba(148, 163, 184, 0.2);
+}
+
+.model-inline-trigger:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.model-inline-trigger__label {
+  font-size: 12px;
+  opacity: 0.65;
+  flex-shrink: 0;
+}
+
+.model-inline-trigger__value {
+  font-size: 13px;
+  font-weight: 500;
+  max-width: 280px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+:global(.dark) .model-inline-trigger:hover:not(:disabled) {
+  background: rgba(148, 163, 184, 0.08);
+  border-color: rgba(148, 163, 184, 0.14);
 }
 
 :deep(.right-rail-card > .n-card__content) {
