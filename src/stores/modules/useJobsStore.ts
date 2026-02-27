@@ -253,9 +253,6 @@ export const useJobsStore = defineStore('jobs', {
       }
 
       const wsUrl = buildJobEventsWsUrl(jobId)
-      if (wsUrl.includes('/robt/')) {
-        this._preferSse[jobId] = true
-      }
 
       if (this._preferSse[jobId]) {
         connectBySse()

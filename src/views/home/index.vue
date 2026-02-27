@@ -863,10 +863,14 @@ function mapAssistantMessage(msg: ChatMessage, task: JobCreateResponse | null, t
   const isMarkdownMessage = Boolean(msg?.meta?.render_markdown) || String(msg?.meta?.message_kind || '') === 'job_markdown'
   const jobNoteJobId = String((msg?.meta as any)?.job_note?.job_id || '').trim() || undefined
   const jobNoteFileName = String((msg?.meta as any)?.job_note?.file_name || '').trim()
+  const effectiveTask = task ?? (msg?.meta?.task as JobCreateResponse | null) ?? null
+  const fallbackText = effectiveTask?.job_id
+    ? `已创建任务（${effectiveTask.job_id}），我会继续检索并实时同步进度。`
+    : '本次回复为空，请重试一次。'
   return appendUiMessage({
     role: 'assistant',
-    content: String(msg?.content || '我已收到。'),
-    task: task ?? (msg?.meta?.task as JobCreateResponse | null) ?? null,
+    content: String(msg?.content || fallbackText),
+    task: effectiveTask,
     toolDecisionReason:
       String(toolDecision?.reason || msg?.meta?.tool_decision?.reason || '').trim() || undefined,
     autoTask: Boolean(msg?.meta?.auto_task),
@@ -1028,7 +1032,14 @@ async function sendMessage() {
     }
 
     if (!String(pendingAssistant.content || '').trim()) {
-      pendingAssistant.content = savedAssistantContent || '我已收到。'
+      const pendingTaskJobId = String((pendingAssistant.task as any)?.job_id || '').trim()
+      if (String(savedAssistantContent || '').trim()) {
+        pendingAssistant.content = savedAssistantContent
+      } else if (pendingTaskJobId) {
+        pendingAssistant.content = `已创建任务（${pendingTaskJobId}），我会继续检索并实时同步进度。`
+      } else {
+        pendingAssistant.content = '本次回复为空，请重试一次。'
+      }
     }
     chatStore.upsertSession({
       session_uuid: sessionUuid,

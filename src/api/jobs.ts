@@ -38,7 +38,10 @@ export function deleteJobApi(jobId: string) {
 }
 
 export function buildJobEventsUrl(jobId: string) {
-  return buildApiUrl(`/jobs/${jobId}/events`)
+  const u = new URL(buildApiUrl(`/jobs/${jobId}/events`))
+  const token = getAuthToken()
+  if (token) u.searchParams.set('token', token)
+  return u.toString()
 }
 
 export function buildJobEventsWsUrl(jobId: string) {

@@ -110,6 +110,8 @@ export async function sendChatMessageStreamApi(
   const url = buildApiUrl(`/chat/sessions/${sessionUuid}/reply-stream`)
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
+    Accept: 'text/event-stream',
+    'Cache-Control': 'no-cache',
   }
   const token = getAuthToken()
   if (token) headers['Authorization'] = `Bearer ${token}`
