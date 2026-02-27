@@ -215,11 +215,16 @@ const historyRecords = computed<HistoryRecord[]>(() => {
       return null
     }
     const snap = jobsStore.jobs[id]?.snapshot
+    if (!snap) {
+      // 无快照任务通常是历史残留 ID（比如旧版本缓存），不在侧边栏展示占位项。
+      return null
+    }
     const stage = humanizeStage(String(snap?.stage || ''))
+    const titleText = String(snap?.user_input || '').trim()
     return {
       id,
       type: 'job' as const,
-      title: snap?.user_input || '点击查看任务详情',
+      title: titleText || `任务 ${String(id || '').slice(0, 8)}`,
       subtitle: stage || statusLabel(String(snap?.status || '')),
       active: route.path === `/jobs/${id}` || jobsStore.currentJobId === id,
       data: snap,
