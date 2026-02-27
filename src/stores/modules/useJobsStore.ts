@@ -39,6 +39,7 @@ export const useJobsStore = defineStore('jobs', {
     _streamMap: {} as Record<string, StreamClient>,
     _retryTimers: {} as Record<string, number>,
     _retryAttempts: {} as Record<string, number>,
+    _pollTimers: {} as Record<string, number>,
     _manualClosed: {} as Record<string, boolean>,
     _preferSse: {} as Record<string, boolean>,
     creating: false,
@@ -106,6 +107,45 @@ export const useJobsStore = defineStore('jobs', {
         window.clearTimeout(timer)
         delete this._retryTimers[jobId]
       }
+    },
+    _clearPoll(jobId: string) {
+      const timer = this._pollTimers[jobId]
+      if (typeof timer === 'number') {
+        window.clearInterval(timer)
+        delete this._pollTimers[jobId]
+      }
+    },
+    _startPollFallback(jobId: string) {
+      this._clearPoll(jobId)
+      const tick = async () => {
+        const jobUi = ensureJobUi(this.jobs, jobId)
+        const snapStatus = String(jobUi.snapshot?.status || '')
+        if (this._manualClosed[jobId] || this._isTerminalStatus(snapStatus)) {
+          this._clearPoll(jobId)
+          return
+        }
+        try {
+          const snap = await this.fetchJob(jobId)
+          const status = String(snap?.status || '')
+          if (this._isTerminalStatus(status)) {
+            if (status === 'completed') {
+              try {
+                await this.fetchNote(jobId)
+                await this.fetchNoteLink(jobId)
+              } catch {
+                // ignore
+              }
+            }
+            this.disconnectJobEvents(jobId, true)
+          }
+        } catch {
+          // keep polling
+        }
+      }
+      this._pollTimers[jobId] = window.setInterval(() => {
+        void tick()
+      }, 2000)
+      void tick()
     },
     _scheduleReconnect(jobId: string) {
       this._clearRetry(jobId)
@@ -199,16 +239,19 @@ export const useJobsStore = defineStore('jobs', {
         return
       }
       this.disconnectJobEvents(jobId, false)
+      this._clearPoll(jobId)
       jobUi.sseStatus = 'connecting'
       const connectBySse = () => {
         const es = openJobEventsSSE(buildJobEventsUrl(jobId), {
           onOpen: () => {
             this._clearRetry(jobId)
+            this._clearPoll(jobId)
             this._retryAttempts[jobId] = 0
             this._preferSse[jobId] = true
             jobUi.sseStatus = 'connected'
           },
           onSnapshot: (snapshot) => {
+            this._clearPoll(jobId)
             jobUi.snapshot = snapshot
             jobUi.sseStatus = 'connected'
           },
@@ -243,10 +286,12 @@ export const useJobsStore = defineStore('jobs', {
             const snapStatus = String(jobUi.snapshot?.status || '')
             if (this._isTerminalStatus(snapStatus)) {
               jobUi.sseStatus = 'disconnected'
+              this._clearPoll(jobId)
               return
             }
             // EventSource 会自动重连，这里仅更新 UI 状态。
             jobUi.sseStatus = 'connecting'
+            this._startPollFallback(jobId)
           },
         })
         this._streamMap[jobId] = { close: () => es.close() }
@@ -276,13 +321,50 @@ export const useJobsStore = defineStore('jobs', {
       }
 
       const ws = openJobEventsWS(wsUrl, {
+        onStatus: (status, data) => {
+          const ts = String((data as any)?.ts || new Date().toISOString())
+          if (status === 'connected') {
+            jobUi.logs.push({ ts, message: 'WebSocket已连接，心跳已启动' })
+          } else if (status === 'heartbeat_timeout') {
+            const idleMs = Number((data as any)?.idle_ms || 0)
+            jobUi.logs.push({ ts, message: `WebSocket心跳超时（idle=${idleMs}ms）` })
+          } else if (status === 'closed') {
+            const code = Number((data as any)?.code || 0)
+            const reason = String((data as any)?.reason || '')
+            jobUi.logs.push({
+              ts,
+              message: `WebSocket关闭（code=${code}${reason ? `, reason=${reason}` : ''}）`,
+            })
+          } else if (status === 'error') {
+            jobUi.logs.push({ ts, message: 'WebSocket发生错误，准备重连/回退' })
+          } else {
+            jobUi.logs.push({ ts, message: `WebSocket状态：${status}` })
+          }
+          if (jobUi.logs.length > 2000) jobUi.logs = jobUi.logs.slice(-1200)
+        },
+        onHeartbeat: (data) => {
+          const ts = String((data as any)?.ts || '')
+          if (ts) {
+            jobUi.logs.push({ ts, message: '收到服务端心跳 heartbeat' })
+            if (jobUi.logs.length > 2000) jobUi.logs = jobUi.logs.slice(-1200)
+          }
+        },
+        onPong: (data) => {
+          const ts = String((data as any)?.ts || new Date().toISOString())
+          const rttMs = Number((data as any)?.rtt_ms || 0)
+          const msg = rttMs > 0 ? `收到心跳应答 pong（RTT=${rttMs}ms）` : '收到心跳应答 pong'
+          jobUi.logs.push({ ts, message: msg })
+          if (jobUi.logs.length > 2000) jobUi.logs = jobUi.logs.slice(-1200)
+        },
         onOpen: () => {
           wsOpened = true
           this._clearRetry(jobId)
+          this._clearPoll(jobId)
           this._retryAttempts[jobId] = 0
           jobUi.sseStatus = 'connected'
         },
         onSnapshot: (snapshot) => {
+          this._clearPoll(jobId)
           jobUi.snapshot = snapshot
           jobUi.sseStatus = 'connected'
         },
@@ -318,8 +400,9 @@ export const useJobsStore = defineStore('jobs', {
             return
           }
           jobUi.sseStatus = 'disconnected'
+          this._startPollFallback(jobId)
         },
-        onClose: () => {
+        onClose: (ev) => {
           if (!wsOpened) {
             switchToSse()
             return
@@ -327,9 +410,20 @@ export const useJobsStore = defineStore('jobs', {
           const snapStatus = String(jobUi.snapshot?.status || '')
           if (this._manualClosed[jobId] || this._isTerminalStatus(snapStatus)) {
             jobUi.sseStatus = 'disconnected'
+            this._clearPoll(jobId)
             return
           }
+          const closeCode = Number(ev?.code || 0)
+          const closeReason = String(ev?.reason || '')
+          if (closeCode || closeReason) {
+            jobUi.logs.push({
+              ts: new Date().toISOString(),
+              message: `WebSocket断开（code=${closeCode}${closeReason ? `, reason=${closeReason}` : ''}）`,
+            })
+            if (jobUi.logs.length > 2000) jobUi.logs = jobUi.logs.slice(-1200)
+          }
           jobUi.sseStatus = 'connecting'
+          this._startPollFallback(jobId)
           this._scheduleReconnect(jobId)
         },
       })
@@ -338,6 +432,7 @@ export const useJobsStore = defineStore('jobs', {
     disconnectJobEvents(jobId: string, manual = true) {
       if (manual) this._manualClosed[jobId] = true
       this._clearRetry(jobId)
+      this._clearPoll(jobId)
       const stream = this._streamMap[jobId]
       if (stream) {
         stream.close()
