@@ -291,7 +291,7 @@
                       知识检索
                     </button>
                     <span class="text-xs opacity-65">
-                      {{ knowledgeRetrievalEnabled ? '已开启：允许 AI 创建 B 站检索/转笔记任务（主题内容可直接用问句）' : '未开启：仅聊天回复，不创建任务' }}
+                      {{ knowledgeRetrievalEnabled ? '已开启：允许 AI 创建 B 站检索/转笔记任务（主题内容可直接用问句）' : '未开启：仅聊天，不创建任务；知识问答会优先尝试命中本地 MD 知识库' }}
                     </span>
                   </div>
                 </div>
@@ -302,6 +302,8 @@
                   :autosize="{ minRows: 3, maxRows: 8 }"
                   class="chat-composer-input"
                   placeholder="先像聊天一样输入问题（如：你能帮我做什么 / 什么是LLM？）。需要执行B站检索与转笔记时，再开启上方“知识检索”（主题内容可直接用问句）。"
+                  @compositionstart="onInputCompositionStart"
+                  @compositionend="onInputCompositionEnd"
                   @keydown.enter.exact.prevent="handleEnterSend"
                 />
 
@@ -550,6 +552,7 @@ const globalStore = useGlobalStore()
 const CHAT_MODEL_STORAGE_KEY = 'robot_web_selected_chat_model'
 
 const userInput = ref('')
+const imeComposing = ref(false)
 const messages = ref<UiChatMessage[]>([])
 const sending = ref(false)
 const knowledgeRetrievalEnabled = ref(false)
@@ -692,9 +695,22 @@ watch(
 async function bootstrapCurrentJob() {
   if (jobsStore.currentJobId && !currentSnapshot.value) {
     try {
-      await jobsStore.fetchJob(jobsStore.currentJobId)
+      const snap = await jobsStore.fetchJob(jobsStore.currentJobId)
+      const st = String(snap?.status || '')
+      if (st === 'running' || st === 'queued' || st === 'waiting_user_pick') {
+        jobsStore.connectJobEvents(jobsStore.currentJobId)
+      }
     } catch {
       // ignore bootstrap errors
+    }
+    return
+  }
+  if (jobsStore.currentJobId && currentSnapshot.value) {
+    const st = String(currentSnapshot.value.status || '')
+    if ((st === 'running' || st === 'queued' || st === 'waiting_user_pick')
+      && currentJobState.value?.sseStatus !== 'connected'
+      && currentJobState.value?.sseStatus !== 'connecting') {
+      jobsStore.connectJobEvents(jobsStore.currentJobId)
     }
   }
 }
@@ -1441,7 +1457,18 @@ async function syncCurrentJobNoteIntoChatIfNeeded(jobIdInput?: string) {
 
 function handleEnterSend(e: KeyboardEvent) {
   if (e.shiftKey) return
+  const native = e as KeyboardEvent & { keyCode?: number; isComposing?: boolean }
+  const targetComposing = Boolean((e.target as any)?.composing)
+  if (imeComposing.value || native.isComposing || native.keyCode === 229 || targetComposing) return
   sendMessage()
+}
+
+function onInputCompositionStart() {
+  imeComposing.value = true
+}
+
+function onInputCompositionEnd() {
+  imeComposing.value = false
 }
 
 function tagType(status?: string) {

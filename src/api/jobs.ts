@@ -1,4 +1,4 @@
-import { apiRequest, buildApiUrl } from './client'
+import { apiRequest, buildApiUrl, getAuthToken } from './client'
 import type { JobCreateRequest, JobCreateResponse, JobNoteLinkResponse, JobSnapshot } from './types'
 
 export function createJobApi(payload: JobCreateRequest) {
@@ -39,6 +39,15 @@ export function deleteJobApi(jobId: string) {
 
 export function buildJobEventsUrl(jobId: string) {
   return buildApiUrl(`/jobs/${jobId}/events`)
+}
+
+export function buildJobEventsWsUrl(jobId: string) {
+  const httpUrl = buildApiUrl(`/jobs/${jobId}/ws`)
+  const u = new URL(httpUrl)
+  u.protocol = u.protocol === 'https:' ? 'wss:' : 'ws:'
+  const token = getAuthToken()
+  if (token) u.searchParams.set('token', token)
+  return u.toString()
 }
 
 export function buildJobNoteDownloadUrl(jobId: string) {
