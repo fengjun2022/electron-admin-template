@@ -397,6 +397,10 @@ const displayLogs = computed(() => {
 const displayEvents = computed(() => {
   const events = (jobState.value?.events || []) as Array<any>
   return events
+    .filter((ev) => {
+      const type = String(ev?.type || 'message')
+      return type !== 'heartbeat' && type !== 'ws_status' && type !== 'pong' && type !== 'snapshot'
+    })
     .slice(-80)
     .map((ev) => {
       const type = String(ev?.type || 'message')
@@ -485,17 +489,21 @@ function statusTagType(status?: string) {
   if (status === 'failed') return 'error'
   if (status === 'running') return 'success' // 用户要求：运行中显示绿色
   if (status === 'queued') return 'info'
+  if (status === 'init') return 'info'
   if (status === 'waiting_user_pick') return 'warning'
   return 'default'
 }
 
 function statusLabel(status?: string) {
-  if (status === 'completed') return '已完成'
-  if (status === 'failed') return '失败'
-  if (status === 'running') return '运行中'
-  if (status === 'queued') return '排队中'
-  if (status === 'waiting_user_pick') return '等待选择视频'
-  return status || '未知'
+  const s = String(status || '').trim().toLowerCase()
+  if (!s) return '未知'
+  if (s === 'completed') return '已完成'
+  if (s === 'failed') return '失败'
+  if (s === 'running') return '运行中'
+  if (s === 'queued') return '排队中'
+  if (s === 'init') return '初始化中'
+  if (s === 'waiting_user_pick') return '等待选择视频'
+  return '处理中'
 }
 
 function kindLabel(kind?: string) {
@@ -507,12 +515,15 @@ function kindLabel(kind?: string) {
 function humanizeStage(stage: string) {
   const s = (stage || '').trim()
   if (!s) return '等待任务开始'
+  if (s === 'init') return '初始化任务'
   if (s.includes('search_round_')) return 'AI 正在检索并评估候选视频'
   if (s === 'waiting_user_pick') return '等待你选择要总结的视频'
   if (s === 'queue_waiting') return '已加入全局队列，等待处理'
   if (s === 'queue_waiting_children') return '已加入队列，等待逐个处理视频'
   if (s === 'run_selected_video_pipelines') return 'AI 正在逐个处理已选视频'
   if (s === 'merge_multi_notes') return 'AI 正在合并多份中间笔记（归纳总结）'
+  if (s === 'search_candidates') return '正在搜索候选视频'
+  if (s === 'ai_select_video') return 'AI 正在筛选候选视频'
   if (s === 'extract_audio_url') return '正在提取音频链接'
   if (s === 'download_audio') return '正在下载音频'
   if (s === 'convert_mp3') return '正在转换音频格式'
@@ -522,19 +533,27 @@ function humanizeStage(stage: string) {
   if (s === 'cleanup') return '正在清理中间文件'
   if (s === 'done') return '任务已完成'
   if (s.includes('failed')) return '任务执行失败'
-  return s
+  return s.replace(/_/g, ' ')
 }
 
 function humanizeDetail(detail: string, stage: string) {
-  const d = (detail || '').trim()
+  let d = (detail || '').trim()
   if (!d) return '系统正在处理，请稍候'
   if (d.includes('Error code: 401 - Invalid token')) {
     return '模型服务认证失败（大模型 API Key 无效或未配置）'
   }
   if ((stage || '').includes('search_round_')) {
-    return d.replace(/^search_round_\d+:\s*/i, '')
+    d = d.replace(/^search_round_\d+[:：]\s*/i, '')
   }
   return d
+    .replace(/\bwaiting_user_pick\b/gi, '等待选择视频')
+    .replace(/\bqueue_waiting_children\b/gi, '已入队等待逐个处理')
+    .replace(/\bqueue_waiting\b/gi, '队列等待中')
+    .replace(/\brun_selected_video_pipelines\b/gi, '处理已选视频')
+    .replace(/\bmerge_multi_notes\b/gi, '合并多份笔记')
+    .replace(/\bsearch_candidates\b/gi, '搜索候选视频')
+    .replace(/\bai_select_video\b/gi, '筛选候选视频')
+    .replace(/\binit\b/gi, '初始化')
 }
 
 function humanizeError(err: string) {
@@ -577,6 +596,14 @@ function humanizeLogMessage(message: string) {
     .replace(/^已清理中间音频文件/i, '中间音频文件已清理（节省空间）')
     .replace(/^转写文本长度[:：]?\s*(\d+)\s*字符/i, '语音已转文字（约 $1 字）')
     .replace(/^已获取音频主链接/i, '已获取音频下载链接')
+    .replace(/\bwaiting_user_pick\b/gi, '等待选择视频')
+    .replace(/\bqueue_waiting_children\b/gi, '已入队等待逐个处理')
+    .replace(/\bqueue_waiting\b/gi, '队列等待中')
+    .replace(/\brun_selected_video_pipelines\b/gi, '处理已选视频')
+    .replace(/\bmerge_multi_notes\b/gi, '合并多份笔记')
+    .replace(/\bsearch_candidates\b/gi, '搜索候选视频')
+    .replace(/\bai_select_video\b/gi, '筛选候选视频')
+    .replace(/\binit\b/gi, '初始化')
   return m
 }
 
@@ -610,14 +637,15 @@ function eventTagType(type: string) {
 
 function eventLabel(type: string) {
   const t = String(type || '')
-  if (t === 'snapshot') return '快照'
   if (t === 'status') return '进度更新'
   if (t === 'log') return '过程说明'
   if (t === 'completed') return '已完成'
   if (t === 'failed') return '失败'
-  if (t === 'heartbeat') return '连接心跳'
+  if (t === 'waiting_user_pick') return '等待操作'
+  if (t === 'queue_status') return '队列状态'
+  if (t === 'topic_selected_videos') return '候选结果'
   if (t === 'job_created') return '任务创建'
-  return t || '事件'
+  return '过程事件'
 }
 
 function humanizeEvent(type: string, data: any) {
@@ -633,13 +661,23 @@ function humanizeEvent(type: string, data: any) {
   if (type === 'failed') {
     return humanizeError(String(data?.error || '任务执行失败'))
   }
-  if (type === 'heartbeat') {
-    return '实时连接正常'
-  }
   if (type === 'job_created') {
     return '任务已创建，等待系统开始处理'
   }
-  return JSON.stringify(data, null, 2)
+  if (type === 'waiting_user_pick') {
+    return 'AI 已筛选出候选视频，等待你选择后继续执行。'
+  }
+  if (type === 'queue_status') {
+    const queue = (data?.queue_batch || data?.queue || {}) as Record<string, any>
+    const userPending = Number(queue?.user_pending_count || 0)
+    const globalPending = Number(queue?.global_pending_count || 0)
+    return `队列更新：你的队列 ${userPending}，全局队列 ${globalPending}`
+  }
+  if (type === 'topic_selected_videos') {
+    const count = Number(data?.count || (Array.isArray(data?.items) ? data.items.length : 0) || 0)
+    return `AI 已筛选出 ${count} 条候选视频`
+  }
+  return '任务正在处理中'
 }
 
 async function bootstrap() {

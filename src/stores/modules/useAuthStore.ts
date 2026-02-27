@@ -1,13 +1,9 @@
 import { defineStore } from 'pinia'
 import { clearAuthToken, getApiBaseUrl, getAuthToken, setApiBaseUrl, setAuthToken } from '@/api/client'
-import { loginApi, meApi } from '@/api/auth'
-import type { LoginResponse, MeResponse, PromptSettings } from '@/api/types'
+import { loginApi, meApi, registerApi } from '@/api/auth'
+import type { AuthUserProfile, LoginResponse, MeResponse, PromptSettings } from '@/api/types'
 
-type AuthUser = {
-  id: number
-  username: string
-  display_name?: string
-}
+type AuthUser = AuthUserProfile
 
 export const useAuthStore = defineStore('auth', {
   state: () => ({
@@ -35,6 +31,16 @@ export const useAuthStore = defineStore('auth', {
         this.loading = false
       }
     },
+    async register(username: string, password: string, displayName = '') {
+      this.loading = true
+      try {
+        const res = await registerApi({ username, password, display_name: displayName })
+        this.applyLoginResponse(res)
+        return res
+      } finally {
+        this.loading = false
+      }
+    },
     applyLoginResponse(res: LoginResponse) {
       this.token = res.token
       setAuthToken(res.token)
@@ -47,11 +53,7 @@ export const useAuthStore = defineStore('auth', {
       return res
     },
     applyMeResponse(res: MeResponse) {
-      this.user = {
-        id: res.user.id,
-        username: res.user.username,
-        display_name: res.user.display_name,
-      }
+      this.user = res.user
       this.promptSettings = res.prompt_settings
     },
     logout() {
@@ -65,4 +67,3 @@ export const useAuthStore = defineStore('auth', {
     pick: ['token', 'user', 'promptSettings', 'apiBaseUrl'],
   },
 })
-

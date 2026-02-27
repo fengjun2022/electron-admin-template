@@ -1,7 +1,6 @@
 import { defineStore } from 'pinia'
 import { openJobEventsWS } from '@/api/ws'
-import { openJobEventsSSE } from '@/api/sse'
-import { buildJobEventsUrl, buildJobEventsWsUrl, getJobApi, getJobNoteApi, getJobNoteLinkApi, createJobApi, deleteJobApi } from '@/api/jobs'
+import { buildJobEventsWsUrl, getJobApi, getJobNoteApi, getJobNoteLinkApi, createJobApi, deleteJobApi } from '@/api/jobs'
 import type { JobCreateRequest, JobSnapshot, JobEvent, JobNoteLinkResponse } from '@/api/types'
 
 type SseStatus = 'idle' | 'connecting' | 'connected' | 'disconnected'
@@ -16,6 +15,91 @@ type JobUiState = {
 }
 
 type StreamClient = { close: () => void }
+
+const STATUS_LABEL_MAP: Record<string, string> = {
+  waiting_user_pick: '等待选择视频',
+  queued: '排队中',
+  running: '运行中',
+  completed: '已完成',
+  failed: '失败',
+}
+
+const STAGE_LABEL_MAP: Record<string, string> = {
+  init: '初始化任务',
+  waiting_user_pick: '等待你选择要总结的视频',
+  queue_waiting: '已加入队列，等待处理',
+  queue_waiting_children: '已加入队列，等待逐个处理视频',
+  run_selected_video_pipelines: '正在处理你选择的视频',
+  merge_multi_notes: '正在合并多份笔记',
+  search_candidates: '正在搜索候选视频',
+  ai_select_video: 'AI 正在筛选候选视频',
+  extract_audio_url: '正在提取音频链接',
+  download_audio: '正在下载音频',
+  convert_mp3: '正在转换音频格式',
+  demucs: '正在分离人声',
+  transcribe: '正在语音转文字',
+  generate_note: 'AI 正在生成笔记',
+  cleanup: '正在清理中间文件',
+  done: '任务已完成',
+  completed: '任务已完成',
+}
+
+function statusLabel(status?: string) {
+  const s = String(status || '').trim().toLowerCase()
+  if (!s) return '未开始'
+  return STATUS_LABEL_MAP[s] || '处理中'
+}
+
+function humanizeStage(stage?: string) {
+  const s = String(stage || '').trim()
+  if (!s) return ''
+  if (STAGE_LABEL_MAP[s]) return STAGE_LABEL_MAP[s]
+  const roundMatch = s.match(/^search_round_(\d+)$/i)
+  if (roundMatch?.[1]) return `AI 正在进行第 ${roundMatch[1]} 轮检索`
+  if (/^(init|queued|running|completed|failed|waiting_user_pick)$/i.test(s)) {
+    return statusLabel(s)
+  }
+  return s.replace(/_/g, ' ')
+}
+
+function humanizeDetail(detail?: string, stage?: string) {
+  let d = String(detail || '').trim()
+  if (!d) return ''
+  d = d
+    .replace(/\bwaiting_user_pick\b/gi, '等待选择视频')
+    .replace(/\bqueue_waiting_children\b/gi, '已入队等待逐个处理')
+    .replace(/\bqueue_waiting\b/gi, '队列等待中')
+    .replace(/\brun_selected_video_pipelines\b/gi, '处理已选视频')
+    .replace(/\bmerge_multi_notes\b/gi, '合并多份笔记')
+    .replace(/\bsearch_candidates\b/gi, '搜索候选视频')
+    .replace(/\bai_select_video\b/gi, '筛选候选视频')
+    .replace(/\binit\b/gi, '初始化')
+    .replace(/\bqueued\b/gi, '排队中')
+    .replace(/\brunning\b/gi, '运行中')
+    .replace(/\bcompleted\b/gi, '已完成')
+    .replace(/\bfailed\b/gi, '失败')
+  if (/^search_round_\d+[:：]/i.test(d)) d = d.replace(/^search_round_(\d+)[:：]\s*/i, '第 $1 轮检索：')
+  if (/^(waiting_user_pick|init)\s*[|：:]/i.test(String(detail || ''))) {
+    const stageText = humanizeStage(stage) || '当前步骤'
+    d = d.replace(/^(waiting_user_pick|init)\s*[|：:]\s*/i, `${stageText}：`)
+  }
+  return d
+}
+
+function humanizeLogMessage(text?: string) {
+  const t = String(text || '').trim()
+  if (!t) return ''
+  return t
+    .replace(/^任务已创建\s*\(([^)]+)\)\s*$/i, (_, s: string) => `任务已创建（${statusLabel(s)}）`)
+    .replace(/\bwaiting_user_pick\b/gi, '等待选择视频')
+    .replace(/\bqueue_waiting_children\b/gi, '已入队等待逐个处理')
+    .replace(/\bqueue_waiting\b/gi, '队列等待中')
+    .replace(/\brun_selected_video_pipelines\b/gi, '处理已选视频')
+    .replace(/\bmerge_multi_notes\b/gi, '合并多份笔记')
+    .replace(/\bsearch_candidates\b/gi, '搜索候选视频')
+    .replace(/\bai_select_video\b/gi, '筛选候选视频')
+    .replace(/\binit\b/gi, '初始化')
+}
 
 function ensureJobUi(map: Record<string, JobUiState>, jobId: string): JobUiState {
   if (!map[jobId]) {
@@ -40,7 +124,6 @@ export const useJobsStore = defineStore('jobs', {
     _retryTimers: {} as Record<string, number>,
     _retryAttempts: {} as Record<string, number>,
     _manualClosed: {} as Record<string, boolean>,
-    _preferSse: {} as Record<string, boolean>,
     creating: false,
   }),
   getters: {
@@ -74,7 +157,7 @@ export const useJobsStore = defineStore('jobs', {
         const res = await createJobApi(req)
         this.setCurrentJob(res.job_id)
         const jobUi = ensureJobUi(this.jobs, res.job_id)
-        jobUi.logs.push({ ts: res.created_at, message: `任务已创建（${res.status}）` })
+        jobUi.logs.push({ ts: res.created_at, message: `任务已创建（${statusLabel(res.status)}）` })
         return res
       } finally {
         this.creating = false
@@ -123,6 +206,7 @@ export const useJobsStore = defineStore('jobs', {
     },
     _applyRealtimeEvent(jobId: string, type: string, data: unknown) {
       const jobUi = ensureJobUi(this.jobs, jobId)
+      if (type === 'heartbeat' || type === 'pong' || type === 'ws_status' || type === 'snapshot') return
       jobUi.events.push({ type, data })
       if (jobUi.events.length > 1000) jobUi.events = jobUi.events.slice(-600)
       if (type === 'status') {
@@ -130,9 +214,9 @@ export const useJobsStore = defineStore('jobs', {
         if (jobUi.snapshot) {
           jobUi.snapshot = { ...jobUi.snapshot, stage: d.stage || '', detail: d.detail || '' }
         }
-        const stage = String(d?.stage || '').trim()
-        const detail = String(d?.detail || '').trim()
-        const msg = [stage, detail].filter(Boolean).join('：')
+        const stage = humanizeStage(d?.stage)
+        const detail = humanizeDetail(d?.detail, d?.stage)
+        const msg = [stage, detail].filter(Boolean).join('：').replace(/：+/g, '：')
         if (msg) {
           jobUi.logs.push({ ts: d?.ts, message: msg })
           if (jobUi.logs.length > 2000) jobUi.logs = jobUi.logs.slice(-1200)
@@ -147,6 +231,8 @@ export const useJobsStore = defineStore('jobs', {
             result: (d?.result ?? jobUi.snapshot.result) as any,
           }
         }
+        jobUi.logs.push({ ts: d?.ts, message: 'AI 已筛选出候选视频，等待你选择后继续' })
+        if (jobUi.logs.length > 2000) jobUi.logs = jobUi.logs.slice(-1200)
       }
       if (type === 'topic_selected_videos') {
         const d = data as any
@@ -185,7 +271,9 @@ export const useJobsStore = defineStore('jobs', {
       }
       if (type === 'log') {
         const d = data as any
-        jobUi.logs.push({ ts: d?.ts, message: d?.message || '' })
+        const m = humanizeLogMessage(String(d?.message || ''))
+        if (!m) return
+        jobUi.logs.push({ ts: d?.ts, message: m })
         if (jobUi.logs.length > 2000) jobUi.logs = jobUi.logs.slice(-1200)
       }
     },
@@ -198,100 +286,13 @@ export const useJobsStore = defineStore('jobs', {
       }
       this.disconnectJobEvents(jobId, false)
       jobUi.sseStatus = 'connecting'
-      const connectBySse = () => {
-        const es = openJobEventsSSE(buildJobEventsUrl(jobId), {
-          onOpen: () => {
-            this._clearRetry(jobId)
-            this._retryAttempts[jobId] = 0
-            this._preferSse[jobId] = true
-            jobUi.sseStatus = 'connected'
-          },
-          onSnapshot: (snapshot) => {
-            jobUi.snapshot = snapshot
-            jobUi.sseStatus = 'connected'
-          },
-          onEvent: (type, data) => {
-            this._applyRealtimeEvent(jobId, type, data)
-          },
-          onCompleted: async (data) => {
-            jobUi.sseStatus = 'disconnected'
-            const d = data as any
-            if (jobUi.snapshot) {
-              jobUi.snapshot = {
-                ...jobUi.snapshot,
-                status: 'completed',
-                stage: '任务已完成',
-                detail: '任务已完成',
-                result: d.result ?? jobUi.snapshot.result,
-              }
-            }
-            jobUi.logs.push({ ts: new Date().toISOString(), message: '当前任务已完成' })
-            if (jobUi.logs.length > 2000) jobUi.logs = jobUi.logs.slice(-1200)
-            try {
-              await this.fetchJob(jobId)
-              await this.fetchNote(jobId)
-              await this.fetchNoteLink(jobId)
-            } catch {
-              // ignore
-            }
-            this.disconnectJobEvents(jobId, true)
-          },
-          onFailed: (data) => {
-            jobUi.sseStatus = 'disconnected'
-            const d = data as any
-            if (jobUi.snapshot) {
-              jobUi.snapshot = {
-                ...jobUi.snapshot,
-                status: 'failed',
-                stage: '任务失败',
-                detail: String(d?.error || '任务执行失败'),
-                error: d.error || jobUi.snapshot.error,
-              }
-            }
-            jobUi.logs.push({ ts: new Date().toISOString(), message: `任务失败：${String(d?.error || '未知错误')}` })
-            if (jobUi.logs.length > 2000) jobUi.logs = jobUi.logs.slice(-1200)
-            this.disconnectJobEvents(jobId, true)
-          },
-          onError: () => {
-            if (this._manualClosed[jobId]) return
-            const snapStatus = String(jobUi.snapshot?.status || '')
-            if (this._isTerminalStatus(snapStatus)) {
-              jobUi.sseStatus = 'disconnected'
-              return
-            }
-            // EventSource 会自动重连，这里仅更新 UI 状态。
-            jobUi.sseStatus = 'connecting'
-          },
-        })
-        this._streamMap[jobId] = { close: () => es.close() }
-      }
 
       const wsUrl = buildJobEventsWsUrl(jobId)
-
-      if (this._preferSse[jobId]) {
-        connectBySse()
-        return
-      }
-
       let wsOpened = false
-      let wsOpenedAt = 0
-      let switchedToSse = false
-      const switchToSse = () => {
-        if (switchedToSse || this._manualClosed[jobId]) return
-        switchedToSse = true
-        this._preferSse[jobId] = true
-        const cur = this._streamMap[jobId]
-        if (cur) {
-          try { cur.close() } catch { /* ignore */ }
-          delete this._streamMap[jobId]
-        }
-        connectBySse()
-      }
 
       const ws = openJobEventsWS(wsUrl, {
         onOpen: () => {
           wsOpened = true
-          wsOpenedAt = Date.now()
           this._clearRetry(jobId)
           this._retryAttempts[jobId] = 0
           jobUi.sseStatus = 'connected'
@@ -343,26 +344,31 @@ export const useJobsStore = defineStore('jobs', {
           this.disconnectJobEvents(jobId, true)
         },
         onError: () => {
-          if (!wsOpened) {
-            switchToSse()
+          if (this._manualClosed[jobId]) return
+          const snapStatus = String(jobUi.snapshot?.status || '')
+          if (this._isTerminalStatus(snapStatus)) {
+            jobUi.sseStatus = 'disconnected'
             return
           }
-          jobUi.sseStatus = 'disconnected'
+          jobUi.sseStatus = 'connecting'
+          this._scheduleReconnect(jobId)
         },
         onClose: (ev) => {
-          if (!wsOpened) {
-            switchToSse()
-            return
-          }
+          if (!wsOpened && this._manualClosed[jobId]) return
           const snapStatus = String(jobUi.snapshot?.status || '')
           if (this._manualClosed[jobId] || this._isTerminalStatus(snapStatus)) {
             jobUi.sseStatus = 'disconnected'
             return
           }
           const closeCode = Number(ev?.code || 0)
-          const lifetimeMs = wsOpenedAt > 0 ? (Date.now() - wsOpenedAt) : 0
-          if (closeCode === 1000 && lifetimeMs > 0 && lifetimeMs < 3000) {
-            switchToSse()
+          const closeReason = String(ev?.reason || '')
+          // 后端主动释放连接：空闲超时 / 等待用户选择 / 连接数上限，不自动重连，避免无意义占用资源。
+          if (closeCode === 4002 || closeCode === 4003 || closeCode === 4429
+            || closeReason.includes('idle_timeout')
+            || closeReason.includes('awaiting_user_pick')
+            || closeReason.includes('too many connections')
+            || closeReason.includes('job_terminal')) {
+            jobUi.sseStatus = 'disconnected'
             return
           }
           jobUi.sseStatus = 'connecting'

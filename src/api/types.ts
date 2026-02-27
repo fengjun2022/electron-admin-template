@@ -1,5 +1,6 @@
 export type JobStatus = 'queued' | 'running' | 'waiting_user_pick' | 'completed' | 'failed'
 export type JobKind = 'single_video' | 'topic' | 'unknown'
+export type UserRole = 'admin' | 'user' | 'tryuser'
 
 export interface PromptSettings {
   user_id: number
@@ -13,27 +14,66 @@ export interface LoginRequest {
   password: string
 }
 
+export interface RegisterRequest {
+  username: string
+  password: string
+  display_name?: string
+}
+
+export interface AuthUserProfile {
+  id: number
+  username: string
+  display_name: string
+  role: UserRole
+  chat_quota_total: number
+  chat_quota_used: number
+  chat_quota_remaining: number
+  is_active?: number
+  created_at?: string
+  updated_at?: string
+}
+
 export interface LoginResponse {
   token: string
   token_type: 'Bearer'
-  user: {
-    id: number
-    username: string
-    display_name: string
-  }
+  user: AuthUserProfile
   prompt_settings: PromptSettings
 }
 
 export interface MeResponse {
-  user: {
-    id: number
-    username: string
-    display_name?: string
-    is_active?: number
-    created_at?: string
-    updated_at?: string
-  }
+  user: AuthUserProfile
   prompt_settings: PromptSettings
+}
+
+export type RegisterResponse = LoginResponse
+
+export interface AdminUserCreateRequest {
+  username: string
+  password: string
+  display_name?: string
+  role: UserRole
+  chat_quota_total?: number | null
+  is_active?: boolean
+}
+
+export interface AdminUserUpdateRequest {
+  display_name?: string
+  password?: string
+  role?: UserRole
+  chat_quota_total?: number | null
+  chat_quota_used?: number | null
+  is_active?: boolean
+}
+
+export interface AdminUsersListResponse {
+  ok: boolean
+  items: AuthUserProfile[]
+  total: number
+}
+
+export interface AdminUserUpsertResponse {
+  ok: boolean
+  item: AuthUserProfile
 }
 
 export interface PromptCurrentResponse {

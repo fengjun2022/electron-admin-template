@@ -1,5 +1,5 @@
 import { apiRequest } from './client'
-import type { LoginRequest, LoginResponse, MeResponse } from './types'
+import type { LoginRequest, LoginResponse, MeResponse, RegisterRequest, RegisterResponse } from './types'
 
 export function loginApi(payload: LoginRequest) {
   return apiRequest<LoginResponse>('/auth/login', {
@@ -16,3 +16,10 @@ export function meApi() {
   })
 }
 
+export function registerApi(payload: RegisterRequest) {
+  return apiRequest<RegisterResponse>('/auth/register', {
+    method: 'POST',
+    body: payload,
+    auth: false,
+  })
+}

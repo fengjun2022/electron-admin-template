@@ -24,33 +24,46 @@ export const useGlobalStore = defineStore('global', () => {
     search_headless: true,
   })
 
+  const authStore = useAuthStore()
+
   // 下拉菜单
-  const userDropdownOptions = computed(() => [
-    {
-      label: 'Prompt设置',
-      key: 'prompt-studio',
-      cb: () => router.push('/prompt-studio'),
-    },
-    {
-      label: isDarkMode.value ? '切换到日间模式' : '切换到夜间模式',
-      key: 'toggle-theme',
-      cb: () => toggleTheme(),
-    },
-    {
-      label: '设置',
-      key: 'settings',
-      cb: () => (showSettingsDrawer.value = true),
-    },
-    {
-      label: '退出登录',
-      key: 'logout',
-      cb: logout
-    },
-  ])
+  const userDropdownOptions = computed(() => {
+    const options: Array<{ label: string; key: string; cb: () => void }> = [
+      {
+        label: 'Prompt设置',
+        key: 'prompt-studio',
+        cb: () => router.push('/prompt-studio'),
+      },
+    ]
+    if (String(authStore.user?.role || '') === 'admin') {
+      options.push({
+        label: '用户管理',
+        key: 'user-admin',
+        cb: () => router.push('/user-admin'),
+      })
+    }
+    options.push(
+      {
+        label: isDarkMode.value ? '切换到日间模式' : '切换到夜间模式',
+        key: 'toggle-theme',
+        cb: () => toggleTheme(),
+      },
+      {
+        label: '设置',
+        key: 'settings',
+        cb: () => (showSettingsDrawer.value = true),
+      },
+      {
+        label: '退出登录',
+        key: 'logout',
+        cb: logout,
+      },
+    )
+    return options
+  })
 
     const logout =() => {
-            const userStore = useUserStore()
-            const authStore = useAuthStore()
+    const userStore = useUserStore()
             userStore.cleanUserInfo()
             authStore.logout()
             if ((window as any)?.electronAPI?.logoutToLoginWindow) {

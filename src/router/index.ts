@@ -1,6 +1,6 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
-import { BrowsersOutline, ReaderOutline, DocumentTextOutline, CogOutline } from "@vicons/ionicons5";
+import { ReaderOutline, DocumentTextOutline, CogOutline, PeopleOutline } from "@vicons/ionicons5";
 // Route definitions
 const routes: Array<RouteRecordRaw> = [
   {
@@ -26,6 +26,12 @@ const routes: Array<RouteRecordRaw> = [
         meta: { title: 'Prompt设置', icon: CogOutline, hideInMenu: true },
         component: () => import('@/views/prompt-studio/index.vue'),
       },
+      {
+        path: '/user-admin',
+        name: 'UserAdmin',
+        meta: { title: '用户管理', icon: PeopleOutline, hideInMenu: true, requiresAdmin: true },
+        component: () => import('@/views/user-admin/index.vue'),
+      },
     ],
   },
     {
@@ -41,6 +47,20 @@ const router = createRouter({
   routes,
 })
 
+function parseTokenPayload(token: string): Record<string, any> | null {
+  try {
+    const msg = String(token || '').split('.', 1)[0] || ''
+    if (!msg) return null
+    const normalized = msg.replace(/-/g, '+').replace(/_/g, '/')
+    const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4)
+    const raw = atob(padded)
+    const obj = JSON.parse(raw)
+    return obj && typeof obj === 'object' ? obj : null
+  } catch {
+    return null
+  }
+}
+
 // Global guards (scaffold)
 router.beforeEach((to, from) => {
   // Example: set page title from meta, add auth checks here
@@ -55,6 +75,13 @@ router.beforeEach((to, from) => {
   const isElectron = typeof window !== 'undefined' && Boolean((window as any)?.electronAPI)
   if (to.path !== '/login' && !token) {
     return { path: '/login' }
+  }
+  if ((to.meta as any)?.requiresAdmin) {
+    const payload = parseTokenPayload(token)
+    const role = String(payload?.role || '').toLowerCase()
+    if (role !== 'admin') {
+      return { path: '/home' }
+    }
   }
   // Electron 登录窗每次都固定落在 /login，不因为本地 token 自动跳到 /home。
   if (to.path === '/login' && token && !isElectron) {

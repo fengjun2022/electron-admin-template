@@ -354,7 +354,7 @@
               <div class="rail-section rail-section--stage">
                 <div class="text-xs opacity-70 mb-1">正在进行的步骤</div>
                 <div class="font-medium">{{ humanizeStage(currentSnapshot?.stage || '') || '等待中' }}</div>
-                <div class="text-xs opacity-70 mt-1">{{ currentSnapshot?.detail || '系统将自动更新' }}</div>
+                <div class="text-xs opacity-70 mt-1">{{ humanizeDetail(currentSnapshot?.detail || '', currentSnapshot?.stage || '') || '系统将自动更新' }}</div>
               </div>
 
               <div class="rail-section rail-section--actions">
@@ -866,7 +866,7 @@ function mapAssistantMessage(msg: ChatMessage, task: JobCreateResponse | null, t
   const effectiveTask = task ?? (msg?.meta?.task as JobCreateResponse | null) ?? null
   const fallbackText = effectiveTask?.job_id
     ? `已创建任务（${effectiveTask.job_id}），我会继续检索并实时同步进度。`
-    : '本次回复为空，请重试一次。'
+    : '抱歉，这次回复异常中断，请重试一次。'
   return appendUiMessage({
     role: 'assistant',
     content: String(msg?.content || fallbackText),
@@ -1038,7 +1038,29 @@ async function sendMessage() {
       } else if (pendingTaskJobId) {
         pendingAssistant.content = `已创建任务（${pendingTaskJobId}），我会继续检索并实时同步进度。`
       } else {
-        pendingAssistant.content = '本次回复为空，请重试一次。'
+        try {
+          const latest = await listChatMessagesApi(sessionUuid, 20)
+          const items = Array.isArray(latest?.items) ? latest.items : []
+          const lastAssistant = [...items].reverse().find((x) => String(x?.role || '') === 'assistant')
+          const recovered = String(lastAssistant?.content || '').trim()
+          if (recovered) {
+            pendingAssistant.content = recovered
+            if (lastAssistant?.meta?.tool_decision?.reason && !pendingAssistant.toolDecisionReason) {
+              pendingAssistant.toolDecisionReason = String(lastAssistant.meta.tool_decision.reason || '').trim() || undefined
+            }
+            pendingAssistant.knowledgeLookupUsed = Boolean(lastAssistant?.meta?.knowledge_lookup?.used) || pendingAssistant.knowledgeLookupUsed
+            pendingAssistant.knowledgeLookupReason =
+              String(lastAssistant?.meta?.knowledge_lookup?.reason || '').trim() || pendingAssistant.knowledgeLookupReason
+            if (Array.isArray(lastAssistant?.meta?.knowledge_hits)) {
+              pendingAssistant.knowledgeHits = lastAssistant.meta.knowledge_hits as Array<Record<string, any>>
+            }
+          }
+        } catch {
+          // ignore recovery errors
+        }
+        if (!String(pendingAssistant.content || '').trim()) {
+          pendingAssistant.content = '抱歉，这次回复异常中断，请重试一次。'
+        }
       }
     }
     chatStore.upsertSession({
@@ -1225,11 +1247,12 @@ function candidateStatItems(video: TopicSelectedVideo) {
 function candidateQueueStatusLabel(status?: string) {
   const s = String(status || '')
   if (s === 'waiting_user_pick') return '待选择'
+  if (s === 'init') return '初始化中'
   if (s === 'queued') return '排队中'
   if (s === 'running') return '处理中'
   if (s === 'completed') return '已完成'
   if (s === 'failed') return '失败'
-  return s || ''
+  return statusLabel(s)
 }
 
 function candidateSelectKey(jobId: string, video: TopicSelectedVideo) {
@@ -1487,42 +1510,77 @@ function tagType(status?: string) {
   if (status === 'failed') return 'error'
   if (status === 'running') return 'success'
   if (status === 'queued') return 'info'
+  if (status === 'init') return 'info'
   if (status === 'waiting_user_pick') return 'warning'
   return 'default'
 }
 
 function statusLabel(status?: string) {
-  if (status === 'completed') return '已完成'
-  if (status === 'failed') return '失败'
-  if (status === 'running') return '运行中'
-  if (status === 'queued') return '排队中'
-  if (status === 'waiting_user_pick') return '等待选择视频'
-  return status || '未开始'
+  const s = String(status || '').trim().toLowerCase()
+  if (!s) return '未开始'
+  if (s === 'completed') return '已完成'
+  if (s === 'failed') return '失败'
+  if (s === 'running') return '运行中'
+  if (s === 'queued') return '排队中'
+  if (s === 'init') return '初始化中'
+  if (s === 'waiting_user_pick') return '等待选择视频'
+  return '处理中'
 }
 
 function humanizeStage(stage: string) {
   const s = (stage || '').trim()
   if (!s) return ''
+  if (s === 'init') return '初始化任务'
   if (s.includes('search_round_')) return 'AI 正在检索并筛选视频'
   if (s === 'waiting_user_pick') return '等待你选择要总结的视频'
   if (s === 'queue_waiting') return '已加入全局队列，等待处理'
   if (s === 'queue_waiting_children') return '已加入队列，等待逐个处理视频'
   if (s === 'run_selected_video_pipelines') return '正在处理选中的视频'
   if (s === 'merge_multi_notes') return 'AI 正在合并多份笔记'
+  if (s === 'search_candidates') return '正在搜索候选视频'
+  if (s === 'ai_select_video') return 'AI 正在筛选候选视频'
+  if (s === 'cleanup') return '正在清理中间文件'
   if (s === 'completed' || s === 'done') return '任务已完成'
   if (s === 'extract_audio_url') return '正在提取音频链接'
   if (s === 'download_audio') return '正在下载音频'
+  if (s === 'convert_mp3') return '正在转换音频格式'
+  if (s === 'demucs') return '正在分离人声'
   if (s === 'transcribe') return '正在语音转文字'
   if (s === 'generate_note') return 'AI 正在生成笔记'
   if (s.includes('failed')) return '任务执行失败'
-  return s
+  return s.replace(/_/g, ' ')
+}
+
+function humanizeDetail(detail: string, stage: string) {
+  let d = (detail || '').trim()
+  if (!d) return ''
+  if ((stage || '').includes('search_round_')) {
+    d = d.replace(/^search_round_\d+[:：]\s*/i, '')
+  }
+  return d
+    .replace(/\bwaiting_user_pick\b/gi, '等待选择视频')
+    .replace(/\bqueue_waiting_children\b/gi, '已入队等待逐个处理')
+    .replace(/\bqueue_waiting\b/gi, '队列等待中')
+    .replace(/\brun_selected_video_pipelines\b/gi, '处理已选视频')
+    .replace(/\bmerge_multi_notes\b/gi, '合并多份笔记')
+    .replace(/\bsearch_candidates\b/gi, '搜索候选视频')
+    .replace(/\bai_select_video\b/gi, '筛选候选视频')
+    .replace(/\binit\b/gi, '初始化')
 }
 
 function humanizeSidebarLog(text: string) {
   const t = (text || '').trim()
   if (!t) return ''
-  if (t.includes('任务已创建')) return '任务已创建，等待执行'
+  if (t.includes('任务已创建')) return t.replace(/\((queued|running|completed|failed|waiting_user_pick|init)\)/ig, (_, s: string) => `（${statusLabel(s)}）`)
   return t
+    .replace(/\bwaiting_user_pick\b/gi, '等待选择视频')
+    .replace(/\bqueue_waiting_children\b/gi, '已入队等待逐个处理')
+    .replace(/\bqueue_waiting\b/gi, '队列等待中')
+    .replace(/\brun_selected_video_pipelines\b/gi, '处理已选视频')
+    .replace(/\bmerge_multi_notes\b/gi, '合并多份笔记')
+    .replace(/\bsearch_candidates\b/gi, '搜索候选视频')
+    .replace(/\bai_select_video\b/gi, '筛选候选视频')
+    .replace(/\binit\b/gi, '初始化')
 }
 </script>
 
