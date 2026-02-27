@@ -90,11 +90,19 @@ export const useJobsStore = defineStore('jobs', {
       return data
     },
     connectJobEvents(jobId: string) {
-      this.disconnectJobEvents(jobId)
       const jobUi = ensureJobUi(this.jobs, jobId)
+      const existing = this._sseMap[jobId]
+      if (existing && (jobUi.sseStatus === 'connecting' || jobUi.sseStatus === 'connected')) {
+        return
+      }
+      this.disconnectJobEvents(jobId)
       jobUi.sseStatus = 'connecting'
       const url = buildJobEventsUrl(jobId)
       const es = openJobEventsSSE(url, {
+        onOpen: () => {
+          // 连接建立成功即切换“已连接”，不依赖首条 snapshot 到达。
+          jobUi.sseStatus = 'connected'
+        },
         onSnapshot: (snapshot) => {
           jobUi.snapshot = snapshot
           jobUi.sseStatus = 'connected'
@@ -106,6 +114,13 @@ export const useJobsStore = defineStore('jobs', {
             const d = data as any
             if (jobUi.snapshot) {
               jobUi.snapshot = { ...jobUi.snapshot, stage: d.stage || '', detail: d.detail || '' }
+            }
+            const stage = String(d?.stage || '').trim()
+            const detail = String(d?.detail || '').trim()
+            const msg = [stage, detail].filter(Boolean).join('：')
+            if (msg) {
+              jobUi.logs.push({ ts: d?.ts, message: msg })
+              if (jobUi.logs.length > 2000) jobUi.logs = jobUi.logs.slice(-1200)
             }
           }
           if (type === 'waiting_user_pick') {

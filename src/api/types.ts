@@ -74,6 +74,7 @@ export interface JobCreateRequest {
   keep_intermediate_audio?: boolean
   playwright_headless?: boolean
   search_headless?: boolean
+  pipeline_model_name?: string
 }
 
 export interface JobCreateResponse {
@@ -128,6 +129,8 @@ export interface TopicQueueBatchSummary {
   waiting_pick_count?: number
   global_pending_count?: number
   user_pending_count?: number
+  global_position?: number | null
+  user_position?: number | null
   current_processing_item?: {
     index?: number
     title?: string
@@ -306,6 +309,16 @@ export interface ChatReplyRequest {
   content: string
   model_name?: string
   auto_task?: boolean
+  search_limit?: number
+  search_timeout?: number
+  search_pages?: number
+  search_scroll_rounds?: number
+  topic_target_videos?: number
+  topic_max_search_rounds?: number
+  keep_intermediate_audio?: boolean
+  playwright_headless?: boolean
+  search_headless?: boolean
+  pipeline_model_name?: string
 }
 
 export interface ChatReplyResponse {

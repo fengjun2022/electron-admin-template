@@ -139,7 +139,7 @@
                     </div>
 
                     <div
-                      v-if="msg.role === 'assistant' && msg.task?.job_id"
+                      v-if="msg.role === 'assistant' && msg.task?.job_id && shouldRenderCandidatePanel(msg)"
                       class="mt-3 px-1"
                     >
                       <div
@@ -166,45 +166,6 @@
                           </div>
                         </div>
 
-                        <div
-                          v-if="jobQueueBatch(msg.task.job_id)"
-                          class="mb-3 rounded-xl p-3 candidate-queue-panel"
-                        >
-                          <div class="text-xs font-medium mb-2">任务队列状态</div>
-                          <div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
-                            <div class="rounded-lg px-2 py-1 candidate-queue-metric">
-                              <div class="opacity-60">你的队列</div>
-                              <div class="font-medium">{{ jobQueueBatch(msg.task.job_id)?.user_pending_count ?? 0 }}</div>
-                            </div>
-                            <div class="rounded-lg px-2 py-1 candidate-queue-metric">
-                              <div class="opacity-60">全局队列</div>
-                              <div class="font-medium">{{ jobQueueBatch(msg.task.job_id)?.global_pending_count ?? 0 }}</div>
-                            </div>
-                            <div class="rounded-lg px-2 py-1 candidate-queue-metric">
-                              <div class="opacity-60">已完成</div>
-                              <div class="font-medium">{{ jobQueueBatch(msg.task.job_id)?.completed_count ?? 0 }}</div>
-                            </div>
-                            <div class="rounded-lg px-2 py-1 candidate-queue-metric">
-                              <div class="opacity-60">处理中</div>
-                              <div class="font-medium truncate">
-                                {{ jobQueueBatch(msg.task.job_id)?.current_processing_item?.title || '暂无' }}
-                              </div>
-                            </div>
-                          </div>
-                          <div v-if="jobQueueCompletedItems(msg.task.job_id).length" class="mt-3 space-y-2">
-                            <div class="text-xs opacity-70">已完成视频笔记（可先预览）</div>
-                            <div class="candidate-queue-done-list">
-                              <div
-                                v-for="(doneItem, doneIdx) in jobQueueCompletedItems(msg.task.job_id)"
-                                :key="`${doneItem.child_job_id || doneIdx}`"
-                                class="rounded-lg p-2 candidate-queue-note"
-                              >
-                                <div class="text-xs font-medium mb-1">{{ doneItem.title || `视频 ${doneIdx + 1}` }}</div>
-                                <pre class="text-[11px] leading-5 whitespace-pre-wrap break-words font-sans opacity-85 candidate-queue-note-preview">{{ String(doneItem.note_preview || '').slice(0, 500) }}</pre>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
                         <div class="space-y-3">
                           <div
                             v-for="(video, idx) in jobVideoCandidates(msg.task.job_id)"
@@ -258,26 +219,6 @@
                                 </div>
                                 <div v-if="video.from_keyword" class="text-xs mt-1 ai-candidate-card__keyword">
                                   关键词：{{ String(video.from_keyword) }}
-                                </div>
-                                <div
-                                  v-if="candidateQueueItem(msg.task.job_id, video)"
-                                  class="mt-2 flex flex-wrap items-center gap-2 text-[11px]"
-                                >
-                                  <span class="inline-flex items-center rounded-full px-2 py-0.5 ai-candidate-chip">
-                                    {{ candidateQueueStatusLabel(candidateQueueItem(msg.task.job_id, video)?.status) }}
-                                  </span>
-                                  <span
-                                    v-if="candidateQueueItem(msg.task.job_id, video)?.queue_runtime?.user_position"
-                                    class="opacity-75"
-                                  >
-                                    我的排位 {{ candidateQueueItem(msg.task.job_id, video)?.queue_runtime?.user_position }}
-                                  </span>
-                                  <span
-                                    v-if="candidateQueueItem(msg.task.job_id, video)?.queue_runtime?.global_position"
-                                    class="opacity-75"
-                                  >
-                                    全局排位 {{ candidateQueueItem(msg.task.job_id, video)?.queue_runtime?.global_position }}
-                                  </span>
                                 </div>
                               </div>
                             </div>
@@ -434,7 +375,7 @@
                 class="rail-section rail-section--plain"
               >
                 <div class="text-xs opacity-70 mb-2">当前队列状态</div>
-                <div class="grid grid-cols-2 gap-2 text-xs">
+                <div class="grid grid-cols-2 md:grid-cols-3 gap-2 text-xs">
                   <div class="rail-subpanel p-2">
                     <div class="opacity-60">你的队列</div>
                     <div class="font-medium">
@@ -448,15 +389,21 @@
                     </div>
                   </div>
                   <div class="rail-subpanel p-2">
+                    <div class="opacity-60">已完成</div>
+                    <div class="font-medium">
+                      {{ currentQueueBatch?.completed_count ?? 0 }}
+                    </div>
+                  </div>
+                  <div class="rail-subpanel p-2">
                     <div class="opacity-60">我的排位</div>
                     <div class="font-medium">
-                      {{ currentQueueRuntime?.user_position ?? '--' }}
+                      {{ currentQueueRuntime?.user_position ?? currentQueueBatch?.user_position ?? '--' }}
                     </div>
                   </div>
                   <div class="rail-subpanel p-2">
                     <div class="opacity-60">全局排位</div>
                     <div class="font-medium">
-                      {{ currentQueueRuntime?.global_position ?? '--' }}
+                      {{ currentQueueRuntime?.global_position ?? currentQueueBatch?.global_position ?? '--' }}
                     </div>
                   </div>
                 </div>
@@ -680,6 +627,15 @@ const currentNoteDownloadUrl = computed(() => {
 const currentQueueRuntime = computed(() => ((currentSnapshot.value?.result as any)?.queue_runtime || null) as Record<string, any> | null)
 const currentQueueBatch = computed(() => ((currentSnapshot.value?.result as any)?.queue_batch || null) as TopicQueueBatchSummary | null)
 const currentQueueBatchCompletedItems = computed(() => Array.isArray(currentQueueBatch.value?.completed_items) ? currentQueueBatch.value!.completed_items! : [])
+const firstTaskMessageLocalIdByJob = computed(() => {
+  const m: Record<string, string> = {}
+  for (const msg of messages.value) {
+    const jobId = String(msg?.task?.job_id || '').trim()
+    if (!jobId || msg.role !== 'assistant') continue
+    if (!m[jobId]) m[jobId] = msg.localId
+  }
+  return m
+})
 
 onMounted(async () => {
   globalStore.setBreadcrumbBarVisible(false)
@@ -973,6 +929,8 @@ async function sendMessage() {
         content: text,
         model_name: selectedModel.value || '',
         auto_task: knowledgeRetrievalEnabled.value,
+        ...(globalStore.chatTaskParams || {}),
+        pipeline_model_name: selectedModel.value || '',
       },
       {
         onMeta: (meta) => {
@@ -1132,6 +1090,19 @@ function candidateQueueItem(jobId: string, video: TopicSelectedVideo) {
 function isTopicTask(jobId: string) {
   const kind = String(jobsStore.jobs[jobId]?.snapshot?.kind || '')
   return kind === 'topic'
+}
+
+function isJobTerminal(jobId: string) {
+  const s = String(jobsStore.jobs[jobId]?.snapshot?.status || '')
+  return s === 'completed' || s === 'failed'
+}
+
+function shouldRenderCandidatePanel(msg: UiChatMessage) {
+  const jobId = String(msg?.task?.job_id || '').trim()
+  if (!jobId) return false
+  if (firstTaskMessageLocalIdByJob.value[jobId] !== msg.localId) return false
+  if (isJobTerminal(jobId)) return false
+  return true
 }
 
 function videoPreviewKey(video: TopicSelectedVideo) {
@@ -1500,6 +1471,7 @@ function humanizeStage(stage: string) {
   if (s === 'queue_waiting_children') return '已加入队列，等待逐个处理视频'
   if (s === 'run_selected_video_pipelines') return '正在处理选中的视频'
   if (s === 'merge_multi_notes') return 'AI 正在合并多份笔记'
+  if (s === 'completed' || s === 'done') return '任务已完成'
   if (s === 'extract_audio_url') return '正在提取音频链接'
   if (s === 'download_audio') return '正在下载音频'
   if (s === 'transcribe') return '正在语音转文字'

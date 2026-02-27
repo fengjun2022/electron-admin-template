@@ -1,6 +1,7 @@
 import type { JobEvent, JobSnapshot } from './types'
 
 type Handlers = {
+  onOpen?: () => void
   onSnapshot?: (snapshot: JobSnapshot) => void
   onEvent?: (type: string, data: unknown) => void
   onCompleted?: (data: Record<string, unknown>) => void
@@ -10,6 +11,10 @@ type Handlers = {
 
 export function openJobEventsSSE(url: string, handlers: Handlers = {}) {
   const es = new EventSource(url)
+
+  es.onopen = () => {
+    handlers.onOpen?.()
+  }
 
   const parse = (e: MessageEvent) => {
     try {

@@ -52,10 +52,12 @@ router.beforeEach((to, from) => {
   // if (to.meta?.requiresAuth && !isAuthed) return { name: 'Home' }
   // Returning void/true continues navigation
   const token = typeof window !== 'undefined' ? (localStorage.getItem('robot_web_auth_token') || '') : ''
+  const isElectron = typeof window !== 'undefined' && Boolean((window as any)?.electronAPI)
   if (to.path !== '/login' && !token) {
     return { path: '/login' }
   }
-  if (to.path === '/login' && token) {
+  // Electron 登录窗每次都固定落在 /login，不因为本地 token 自动跳到 /home。
+  if (to.path === '/login' && token && !isElectron) {
     return { path: '/home' }
   }
   return true
