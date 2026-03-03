@@ -54,5 +54,8 @@ export function buildJobEventsWsUrl(jobId: string) {
 }
 
 export function buildJobNoteDownloadUrl(jobId: string) {
-  return buildApiUrl(`/jobs/${jobId}/note/download`)
+  const u = new URL(buildApiUrl(`/jobs/${jobId}/note/download`))
+  const token = getAuthToken()
+  if (token) u.searchParams.set('token', token)
+  return u.toString()
 }

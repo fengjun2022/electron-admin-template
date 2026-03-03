@@ -420,8 +420,28 @@
                     :key="`${doneItem.child_job_id || idx}`"
                     class="rail-subpanel p-2"
                   >
-                    <div class="text-xs font-medium mb-1">{{ doneItem.title || `视频 ${idx + 1}` }}</div>
-                    <pre class="text-[11px] leading-5 whitespace-pre-wrap break-words font-sans rail-note-preview">{{ String(doneItem.note_preview || '').slice(0, 260) }}</pre>
+                    <div class="text-xs font-medium mb-1">{{ (!looksLikeStatsOnlyTitle(doneItem.title || '') && doneItem.title) ? doneItem.title : `视频 ${idx + 1}` }}</div>
+                    <pre class="text-[11px] leading-5 whitespace-pre-wrap break-words font-sans rail-note-preview">{{ String(doneItem.note_preview || '') }}</pre>
+                    <div v-if="doneItem.child_job_id" class="flex gap-1 mt-2">
+                      <n-button
+                        size="tiny"
+                        tag="a"
+                        :href="childNoteDownloadUrl(doneItem.child_job_id)"
+                        target="_blank"
+                        :disabled="!doneItem.child_job_id"
+                      >
+                        下载 MD
+                      </n-button>
+                      <n-button
+                        size="tiny"
+                        type="primary"
+                        :loading="childNoteLoadingByJobId[doneItem.child_job_id]"
+                        :disabled="hasJobNoteMessageInCurrentChat(doneItem.child_job_id) || childNoteLoadingByJobId[doneItem.child_job_id]"
+                        @click="addChildNoteToChat(doneItem.child_job_id, (!looksLikeStatsOnlyTitle(doneItem.title || '') && doneItem.title) ? doneItem.title : `视频 ${idx + 1}`)"
+                      >
+                        {{ hasJobNoteMessageInCurrentChat(doneItem.child_job_id) ? '已在对话中' : '加入对话' }}
+                      </n-button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -521,7 +541,7 @@ import {
   selectChatCandidateVideosBatchApi,
   sendChatMessageStreamApi,
 } from '@/api/chat'
-import { buildJobNoteDownloadUrl } from '@/api/jobs'
+import { buildJobNoteDownloadUrl, getJobNoteApi, getJobNoteLinkApi } from '@/api/jobs'
 import type { ChatMessage, ChatModelItem, JobCreateResponse, TopicQueueBatchSummary, TopicSelectedVideo } from '@/api/types'
 import MarkdownContent from '@/components/MarkdownContent.vue'
 
@@ -574,6 +594,7 @@ const currentSnapshot = computed(() => currentJobState.value?.snapshot || null)
 const currentUserLabel = computed(() => authStore.user?.display_name || authStore.user?.username || '你')
 const loadingCurrentJobNote = ref(false)
 const syncingJobNoteMessageByJobId = ref<Record<string, boolean>>({})
+const childNoteLoadingByJobId = ref<Record<string, boolean>>({})
 
 const currentSseButtonText = computed(() => {
   const s = currentJobState.value?.sseStatus
@@ -820,6 +841,9 @@ async function loadSessionFromRoute(sessionUuidFromRoute: string) {
     if (latestTaskJobId) {
       chatStore.bindJobToSession(latestTaskJobId, sessionUuid)
       jobsStore.setCurrentJob(latestTaskJobId)
+      // Fetch all task jobs concurrently so per-message candidate cards are restored
+      const olderJobIds = taskJobIds.slice(0, -1)
+      void Promise.allSettled(olderJobIds.map((jid) => jobsStore.fetchJob(jid)))
       try {
         const snap = await jobsStore.fetchJob(latestTaskJobId)
         if (snap?.status === 'running' || snap?.status === 'queued' || snap?.status === 'waiting_user_pick') {
@@ -1487,6 +1511,58 @@ async function syncCurrentJobNoteIntoChatIfNeeded(jobIdInput?: string) {
     delete nextState[jobId]
     syncingJobNoteMessageByJobId.value = nextState
   }
+}
+
+async function addChildNoteToChat(childJobId: string, displayTitle: string) {
+  const jobId = String(childJobId || '').trim()
+  if (!jobId) return
+  const sessionUuid = String(chatSessionUuid.value || '').trim()
+  if (!sessionUuid) {
+    message.warning('请先开启一个对话会话')
+    return
+  }
+  if (hasJobNoteMessageInCurrentChat(jobId)) {
+    message.info('该笔记已在对话中')
+    return
+  }
+  if (childNoteLoadingByJobId.value[jobId]) return
+  childNoteLoadingByJobId.value = { ...childNoteLoadingByJobId.value, [jobId]: true }
+  try {
+    const [noteText, noteLink] = await Promise.all([
+      getJobNoteApi(jobId),
+      getJobNoteLinkApi(jobId).catch(() => null),
+    ])
+    const md = String(noteText || '').trim()
+    if (!md) {
+      message.warning('笔记内容为空，无法加入对话')
+      return
+    }
+    const fileName = String((noteLink as any)?.file_name || displayTitle || `note-${jobId}.md`).trim()
+    const res = await saveChatJobNoteMessageApi(sessionUuid, jobId, {
+      markdown_text: md,
+      file_name: fileName,
+    })
+    const savedMsg = (res.assistant_message || null) as any
+    if (savedMsg && !hasJobNoteMessageInCurrentChat(jobId)) {
+      mapAssistantMessage(savedMsg, null)
+      await nextTick()
+      const el = messagesContainerRef.value
+      if (el) el.scrollTop = el.scrollHeight
+    }
+    message.success('已加入对话，可在聊天中查看完整笔记')
+  } catch (e: any) {
+    message.error(e?.message || '加入对话失败，请重试')
+  } finally {
+    const next = { ...childNoteLoadingByJobId.value }
+    delete next[jobId]
+    childNoteLoadingByJobId.value = next
+  }
+}
+
+function childNoteDownloadUrl(childJobId: string) {
+  const jobId = String(childJobId || '').trim()
+  if (!jobId) return ''
+  return buildJobNoteDownloadUrl(jobId)
 }
 
 function handleEnterSend(e: KeyboardEvent) {
