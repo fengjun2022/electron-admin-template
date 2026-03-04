@@ -47,14 +47,14 @@
                     </div>
                   </template>
 
-                  <div class="max-w-[86%]">
+                  <div :class="msg.role === 'user' ? 'max-w-[86%]' : 'max-w-[90%]'">
                     <div class="text-xs opacity-65 mb-1 px-1">
                       {{ msg.role === 'user' ? currentUserLabel : '小知AI' }}
                     </div>
                     <div
                       class="rounded-2xl px-4 py-3 message-bubble"
                       :class="[
-                        msg.role === 'user' ? 'message-user' : 'message-assistant',
+                        msg.role === 'user' ? 'message-user' : 'message-assistant max-w-[90%]',
                         msg.renderAsMarkdown ? 'message-bubble--markdown' : 'whitespace-pre-wrap break-words',
                         msg.pending ? 'message-pending' : '',
                         msg.pending ? 'opacity-70' : '',
@@ -94,45 +94,55 @@
                     </div>
 
                     <div v-if="msg.role === 'assistant' && (msg.knowledgeHits || []).length" class="mt-3 px-1">
-                      <div class="rounded-2xl p-3 border border-slate-200/80 bg-white/70 dark:bg-slate-900/30 dark:border-slate-700/60">
+                      <div class="rounded-2xl p-3 knowledge-hit-panel">
                         <div class="flex items-center justify-between gap-2 mb-2">
-                          <div class="text-xs opacity-70">知识命中（全局知识库）</div>
+                          <div class="text-xs knowledge-hit-panel__title">知识命中（全局知识库）</div>
                           <n-tag size="small" type="success">{{ (msg.knowledgeHits || []).length }}</n-tag>
                         </div>
                         <div class="space-y-2">
                           <div
                             v-for="(hit, idx) in (msg.knowledgeHits || [])"
                             :key="knowledgeHitKey(hit, idx)"
-                            class="rounded-xl border border-slate-200/80 dark:border-slate-700/50 p-3 bg-white/70 dark:bg-slate-800/30"
+                            class="rounded-xl p-3 knowledge-hit-card"
                           >
                             <div class="flex items-start justify-between gap-3">
                               <div class="min-w-0 flex-1">
-                                <div class="text-xs opacity-60 mb-1">
+                                <div class="text-xs knowledge-hit-card__type mb-1">
                                   {{ hit.doc_type === 'video' ? '视频笔记' : '主题笔记' }}
                                 </div>
-                                <div class="text-sm font-medium leading-5 break-words">
-                                  {{ String(hit.title || '未命名知识') }}
+                                <div class="text-sm font-medium leading-5 break-words knowledge-hit-card__title">
+                                  {{ knowledgeHitDisplayTitle(hit) }}
                                 </div>
-                                <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs opacity-70">
+                                <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs knowledge-hit-card__meta">
                                   <span v-if="hit.up_name">UP：{{ String(hit.up_name) }}</span>
                                   <span v-if="hit.duration_text">时长：{{ String(hit.duration_text) }}</span>
                                 </div>
-                                <div v-if="hit.snippet" class="text-xs opacity-70 mt-2 break-words">
+                                <div v-if="hit.snippet" class="text-xs knowledge-hit-card__snippet mt-2 break-words">
                                   {{ String(hit.snippet) }}
                                 </div>
                               </div>
-                              <n-button
-                                v-if="hit.source_url"
-                                size="tiny"
-                                secondary
-                                @click="openKnowledgeHitSource(hit)"
-                              >
-                                查看来源
-                              </n-button>
+                              <div class="flex flex-col gap-1 shrink-0">
+                                <n-button
+                                  v-if="hit.note_md_path"
+                                  size="tiny"
+                                  type="primary"
+                                  @click="downloadKnowledgeNote(hit)"
+                                >
+                                  查看笔记
+                                </n-button>
+                                <n-button
+                                  v-if="hit.source_url"
+                                  size="tiny"
+                                  secondary
+                                  @click="openKnowledgeHitSource(hit)"
+                                >
+                                  查看来源
+                                </n-button>
+                              </div>
                             </div>
                           </div>
                         </div>
-                        <div class="text-xs opacity-60 mt-2">
+                        <div class="text-xs knowledge-hit-panel__footer mt-2">
                           命中的是全局共享知识库结果；如果你仍要重新检索最新视频，可以继续让我创建任务。
                         </div>
                       </div>
@@ -166,64 +176,56 @@
                           </div>
                         </div>
 
-                        <div class="space-y-3">
+                        <div class="grid grid-cols-3 gap-2">
                           <div
                             v-for="(video, idx) in jobVideoCandidates(msg.task.job_id)"
                             :key="`${msg.task.job_id}-${video.url || video.title || idx}`"
-                            class="rounded-2xl p-3 ai-candidate-card"
+                            class="rounded-xl p-2 ai-candidate-card flex flex-col"
                           >
-                            <div class="flex items-start gap-3">
-                              <div class="w-32 shrink-0">
-                                <div class="rounded-xl overflow-hidden ai-candidate-cover">
-                                  <img
-                                    v-if="videoCoverUrl(video)"
-                                    :src="videoCoverUrl(video) || undefined"
-                                    alt="视频封面"
-                                    class="w-full aspect-video object-cover"
-                                    loading="lazy"
-                                    referrerpolicy="no-referrer"
-                                  />
-                                  <div v-else class="w-full aspect-video flex items-center justify-center text-[11px] opacity-60">
-                                    暂无封面
-                                  </div>
-                                </div>
-                              </div>
-
-                              <div class="min-w-0 flex-1">
-                                <label class="inline-flex items-center gap-2 text-xs mb-1 opacity-80 cursor-pointer select-none">
-                                  <input
-                                    type="checkbox"
-                                    :checked="isCandidateSelected(msg.task.job_id, video)"
-                                    @change="toggleCandidateSelected(msg.task.job_id, video)"
-                                  />
-                                  <span>加入队列后总结笔记</span>
-                                </label>
-                                <div class="text-sm font-semibold leading-5 break-words ai-candidate-card__title">
-                                  {{ candidateDisplayTitle(video, idx) }}
-                                </div>
-                                <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs ai-candidate-card__meta">
-                                  <span v-if="video.up">UP：{{ String(video.up) }}</span>
-                                  <span v-if="video.duration">时长：{{ String(video.duration) }}</span>
-                                </div>
-                                <div v-if="candidateStatItems(video).length" class="mt-2 flex flex-wrap gap-2">
-                                  <span
-                                    v-for="(it, statIdx) in candidateStatItems(video)"
-                                    :key="`${statIdx}-${it.label}-${it.value}`"
-                                    class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] ai-candidate-chip"
-                                  >
-                                    {{ it.label }} {{ it.value }}
-                                  </span>
-                                </div>
-                                <div v-if="video.reason" class="text-xs mt-2 break-words ai-candidate-card__reason">
-                                  推荐理由：{{ String(video.reason) }}
-                                </div>
-                                <div v-if="video.from_keyword" class="text-xs mt-1 ai-candidate-card__keyword">
-                                  关键词：{{ String(video.from_keyword) }}
-                                </div>
+                            <!-- Thumbnail -->
+                            <div class="rounded-lg overflow-hidden ai-candidate-cover mb-2">
+                              <img
+                                v-if="videoCoverUrl(video)"
+                                :src="videoCoverUrl(video) || undefined"
+                                alt="视频封面"
+                                class="w-full aspect-video object-cover"
+                                loading="lazy"
+                                referrerpolicy="no-referrer"
+                              />
+                              <div v-else class="w-full aspect-video flex items-center justify-center text-xs opacity-60">
+                                暂无封面
                               </div>
                             </div>
 
-                            <div class="mt-3 flex items-center justify-end">
+                            <!-- Content -->
+                            <div class="min-w-0 flex-1 flex flex-col">
+                              <label class="inline-flex items-center gap-1.5 text-xs mb-1 opacity-75 cursor-pointer select-none">
+                                <input
+                                  type="checkbox"
+                                  :checked="isCandidateSelected(msg.task.job_id, video)"
+                                  @change="toggleCandidateSelected(msg.task.job_id, video)"
+                                />
+                                <span>加入队列总结</span>
+                              </label>
+                              <div class="text-xs font-semibold leading-[1.45] break-words ai-candidate-card__title line-clamp-2">
+                                {{ candidateDisplayTitle(video, idx) }}
+                              </div>
+                              <div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] ai-candidate-card__meta">
+                                <span v-if="video.up">{{ String(video.up) }}</span>
+                                <span v-if="video.duration">{{ String(video.duration) }}</span>
+                              </div>
+                              <div v-if="candidateStatItems(video).length" class="mt-1 flex flex-wrap gap-1">
+                                <span
+                                  v-for="(it, statIdx) in candidateStatItems(video)"
+                                  :key="`${statIdx}-${it.label}-${it.value}`"
+                                  class="inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] ai-candidate-chip"
+                                >
+                                  {{ it.label }} {{ it.value }}
+                                </span>
+                              </div>
+                            </div>
+
+                            <div class="mt-2 flex items-center justify-end">
                               <n-space size="small">
                                 <n-button
                                   size="tiny"
@@ -451,7 +453,7 @@
                   <div class="text-xs opacity-70">任务日志（最近）</div>
                   <n-tag size="small" type="default">{{ currentSidebarLogs.length }}</n-tag>
                 </div>
-                <div class="rail-subpanel p-2 max-h-[220px] overflow-auto">
+                <div ref="sidebarLogRef" class="rail-subpanel p-2 max-h-[220px] overflow-auto">
                   <template v-if="currentSidebarLogs.length">
                     <div
                       v-for="(log, idx) in currentSidebarLogs"
@@ -581,6 +583,7 @@ const chatModels = ref<ChatModelItem[]>([])
 const selectedModel = ref<string | null>(null)
 const modelsLoading = ref(false)
 const messagesContainerRef = ref<HTMLElement | null>(null)
+const sidebarLogRef = ref<HTMLElement | null>(null)
 const routeNewChatToken = ref<string>('')
 const loadingSessionMessages = ref(false)
 const skipNextRouteSessionHydrateUuid = ref('')
@@ -703,6 +706,16 @@ watch(
     if (el) el.scrollTop = el.scrollHeight
   },
   { deep: true },
+)
+
+// Auto-scroll task log panel to bottom on new log entries
+watch(
+  () => (currentJobState.value?.logs || []).length,
+  async () => {
+    await nextTick()
+    const el = sidebarLogRef.value
+    if (el) el.scrollTop = el.scrollHeight
+  },
 )
 
 watch(
@@ -1224,6 +1237,25 @@ function openKnowledgeHitSource(hit: Record<string, any>) {
   if (typeof window !== 'undefined') window.open(url, '_blank', 'noopener,noreferrer')
 }
 
+function knowledgeHitDisplayTitle(hit: Record<string, any>) {
+  const title = String(hit.title || '').trim()
+  // 如果标题是纯统计数字字符串，用 UP主+笔记类型 作为展示标题
+  if (!title || looksLikeStatsOnlyTitle(title)) {
+    const up = String(hit.up_name || '').trim()
+    const dur = String(hit.duration_text || '').trim()
+    if (up) return dur ? `${up} · ${dur}` : up
+    return hit.doc_type === 'video' ? '视频笔记' : '主题笔记'
+  }
+  return title
+}
+
+function downloadKnowledgeNote(hit: Record<string, any>) {
+  const notePath = String(hit.note_md_path || '').trim()
+  if (!notePath) return
+  const url = `/knowledge/note/download?path=${encodeURIComponent(notePath)}`
+  if (typeof window !== 'undefined') window.open(url, '_blank', 'noopener,noreferrer')
+}
+
 function videoCoverUrl(video: TopicSelectedVideo) {
   const raw = String((video as any).cover || (video as any).pic || (video as any).cover_url || (video as any).thumbnail || '').trim()
   if (!raw) return ''
@@ -1243,8 +1275,9 @@ function looksLikeStatsOnlyTitle(text: string) {
 function candidateDisplayTitle(video: TopicSelectedVideo, idx: number) {
   const title = String(video.title || '').trim()
   if (title && !looksLikeStatsOnlyTitle(title)) return title
+  // 用关键词兜底，最后用序号
   const keyword = String((video as any).from_keyword || '').trim()
-  return keyword ? `候选视频 ${idx + 1}（${keyword}）` : `候选视频 ${idx + 1}`
+  return keyword ? `${keyword} · 视频 ${idx + 1}` : `视频 ${idx + 1}`
 }
 
 function candidateStatItems(video: TopicSelectedVideo) {
@@ -2040,6 +2073,8 @@ function humanizeSidebarLog(text: string) {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  white-space: nowrap;
+  flex-wrap: nowrap;
   color: rgba(51, 65, 85, 0.9);
   font-weight: 500;
 }
@@ -2099,6 +2134,45 @@ function humanizeSidebarLog(text: string) {
   color: rgba(51, 65, 85, 0.82);
   font-weight: 600;
   letter-spacing: 0.01em;
+}
+
+/* ── Knowledge Hit Panel ───────────────────────────────── */
+.knowledge-hit-panel {
+  background: #fff;
+  border: 1px solid rgba(203, 213, 225, 0.76);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65), 0 6px 18px rgba(15, 23, 42, 0.05);
+}
+
+.knowledge-hit-panel__title {
+  color: rgba(51, 65, 85, 0.82);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.knowledge-hit-panel__footer {
+  color: rgba(71, 85, 105, 0.7);
+}
+
+.knowledge-hit-card {
+  border: 1px solid rgba(203, 213, 225, 0.78);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.9) 0%, rgba(248, 250, 252, 0.85) 100%);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
+}
+
+.knowledge-hit-card__title {
+  color: #0f172a;
+}
+
+.knowledge-hit-card__type {
+  color: rgba(71, 85, 105, 0.7);
+}
+
+.knowledge-hit-card__meta {
+  color: rgba(71, 85, 105, 0.95);
+}
+
+.knowledge-hit-card__snippet {
+  color: rgba(51, 65, 85, 0.72);
 }
 
 .ai-candidate-card {
@@ -2166,6 +2240,43 @@ function humanizeSidebarLog(text: string) {
 
 :global(.dark) .ai-candidate-panel__title {
   color: rgba(226, 232, 240, 0.86);
+}
+
+/* ── Knowledge Hit Panel dark ───────────────────────────── */
+:global(.dark) .knowledge-hit-panel {
+  background: rgba(31, 41, 55, 0.92);
+  border: 1px solid rgba(75, 85, 99, 0.9);
+  box-shadow: inset 0 1px 0 rgba(148, 163, 184, 0.05), 0 8px 20px rgba(0, 0, 0, 0.24);
+}
+
+:global(.dark) .knowledge-hit-panel__title {
+  color: rgba(226, 232, 240, 0.86);
+}
+
+:global(.dark) .knowledge-hit-panel__footer {
+  color: rgba(148, 163, 184, 0.65);
+}
+
+:global(.dark) .knowledge-hit-card {
+  border: 1px solid rgba(75, 85, 99, 0.72);
+  background: linear-gradient(180deg, rgba(17, 24, 39, 0.5) 0%, rgba(30, 41, 59, 0.5) 100%);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+}
+
+:global(.dark) .knowledge-hit-card__title {
+  color: rgba(241, 245, 249, 0.97);
+}
+
+:global(.dark) .knowledge-hit-card__type {
+  color: rgba(148, 163, 184, 0.75);
+}
+
+:global(.dark) .knowledge-hit-card__meta {
+  color: rgba(203, 213, 225, 0.9);
+}
+
+:global(.dark) .knowledge-hit-card__snippet {
+  color: rgba(148, 163, 184, 0.82);
 }
 
 :global(.dark) .ai-candidate-card {
