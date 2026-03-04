@@ -61,7 +61,7 @@
                       ]"
                     >
                       <div v-if="msg.pending" class="thinking-indicator text-sm">
-                        <span class="thinking-indicator__label">思考中</span>
+                        <span class="thinking-indicator__label">浏览中</span>
                         <span class="thinking-indicator__dots" aria-hidden="true">
                           <i></i><i></i><i></i>
                         </span>
@@ -80,7 +80,7 @@
                       class="mt-2 px-1"
                     >
                       <div class="rounded-xl p-2 search-progress-panel">
-                        <div class="text-[11px] opacity-70 mb-1">检索过程</div>
+                        <div class="text-[11px] opacity-70 mb-1">访问站点</div>
                         <div class="space-y-1 max-h-[140px] overflow-auto">
                           <div
                             v-for="(lg, idx) in (msg.searchProgressLogs || []).slice(-18)"
@@ -88,7 +88,16 @@
                             class="text-[11px] leading-4 opacity-80 whitespace-pre-wrap break-words"
                           >
                             <span class="opacity-60">{{ lg.ts || '--:--:--' }}</span>
-                            <span> {{ lg.message }}</span>
+                            <a
+                              v-if="isHttpUrl(lg.message)"
+                              :href="lg.message"
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              class="ml-1 underline"
+                            >
+                              {{ lg.message }}
+                            </a>
+                            <span v-else> {{ lg.message }}</span>
                           </div>
                         </div>
                       </div>
@@ -759,6 +768,32 @@ onUnmounted(() => {
   stopSearchTaskPolling()
 })
 
+function isHttpUrl(v: string) {
+  return /^https?:\/\/\S+$/i.test(String(v || '').trim())
+}
+
+function extractFirstUrl(text: string) {
+  const raw = String(text || '').trim()
+  if (!raw) return ''
+  const m = raw.match(/https?:\/\/[^\s)"'<>]+/i)
+  return String(m?.[0] || '').replace(/[),.;!?]+$/g, '')
+}
+
+function pickUrlFromLogRow(row: any) {
+  if (row && typeof row === 'object') {
+    const direct = extractFirstUrl(String((row as any)?.url || ''))
+    if (direct) return direct
+    const fromExtra = extractFirstUrl(String((row as any)?.extra?.url || ''))
+    if (fromExtra) return fromExtra
+    const fromMsg = extractFirstUrl(String((row as any)?.message || ''))
+    if (fromMsg) return fromMsg
+    const fromResult = extractFirstUrl(String((row as any)?.result?.url || ''))
+    if (fromResult) return fromResult
+    return ''
+  }
+  return extractFirstUrl(String(row || ''))
+}
+
 async function refreshActiveSearchTaskLogs() {
   if (!knowledgeRetrievalEnabled.value) {
     activeSearchTaskLogs.value = []
@@ -769,15 +804,12 @@ async function refreshActiveSearchTaskLogs() {
     const items = Array.isArray(res.items) ? res.items : []
     const logs: Array<{ ts?: string; message: string }> = []
     for (const item of items) {
-      const tid = String((item as any)?.task_id || '').trim()
-      const mode = String((item as any)?.mode || '').trim()
       const taskLogs = Array.isArray((item as any)?.logs) ? ((item as any)?.logs as any[]) : []
       for (const row of taskLogs.slice(-20)) {
         const ts = String((row as any)?.ts || '')
-        const message = String((row as any)?.message || '').trim()
+        const message = pickUrlFromLogRow(row)
         if (!message) continue
-        const prefix = [mode ? `[${mode}]` : '', tid ? `(${tid.slice(0, 8)})` : ''].filter(Boolean).join(' ')
-        logs.push({ ts, message: `${prefix ? `${prefix} ` : ''}${message}`.trim() })
+        logs.push({ ts, message })
       }
     }
     activeSearchTaskLogs.value = logs.slice(-240)
@@ -792,7 +824,7 @@ function startSearchTaskPolling() {
   if (typeof window === 'undefined') return
   searchTaskPollTimer = window.setInterval(() => {
     void refreshActiveSearchTaskLogs()
-  }, 2500)
+  }, 8000)
 }
 
 function stopSearchTaskPolling() {
@@ -980,10 +1012,12 @@ async function loadSessionFromRoute(sessionUuidFromRoute: string) {
           : undefined,
       jobNoteJobId: String((m.meta as any)?.job_note?.job_id || '').trim() || undefined,
       searchProgressLogs: Array.isArray((m.meta as any)?.search_dispatch?.logs)
-        ? (((m.meta as any)?.search_dispatch?.logs as Array<any>).map((x) => ({
-            ts: String(x?.ts || ''),
-            message: String(x?.message || ''),
-          })))
+        ? (((m.meta as any)?.search_dispatch?.logs as Array<any>)
+            .map((x) => ({
+              ts: String(x?.ts || ''),
+              message: pickUrlFromLogRow(x),
+            }))
+            .filter((x) => isHttpUrl(x.message)))
         : [],
     }))
     messages.value = loaded
@@ -1074,10 +1108,12 @@ function mapAssistantMessage(msg: ChatMessage, task: JobCreateResponse | null, t
     markdownLabel: isMarkdownMessage ? (jobNoteFileName ? `Markdown 结果 · ${jobNoteFileName}` : 'Markdown 结果') : undefined,
     jobNoteJobId,
     searchProgressLogs: Array.isArray((msg?.meta as any)?.search_dispatch?.logs)
-      ? (((msg?.meta as any)?.search_dispatch?.logs as Array<any>).map((x) => ({
-          ts: String(x?.ts || ''),
-          message: String(x?.message || ''),
-        })))
+      ? (((msg?.meta as any)?.search_dispatch?.logs as Array<any>)
+          .map((x) => ({
+            ts: String(x?.ts || ''),
+            message: pickUrlFromLogRow(x),
+          }))
+          .filter((x) => isHttpUrl(x.message)))
       : [],
   })
 }
@@ -1108,12 +1144,9 @@ async function sendMessage() {
     let finalDoneText = ''
     const appendSearchTaskLog = (raw: any) => {
       const ts = String(raw?.ts || new Date().toISOString())
-      const msg = String(raw?.message || raw?.status || '').trim()
-      if (!msg) return
-      const taskId = String(raw?.task_id || '').trim()
-      const mode = String(raw?.mode || '').trim()
-      const prefix = [mode ? `[${mode}]` : '', taskId ? `(${taskId.slice(0, 8)})` : ''].filter(Boolean).join(' ')
-      const line = `${prefix ? `${prefix} ` : ''}${msg}`.trim()
+      const msg = pickUrlFromLogRow(raw)
+      if (!msg || !isHttpUrl(msg)) return
+      const line = msg
       activeSearchTaskLogs.value = [...activeSearchTaskLogs.value, { ts, message: line }].slice(-240)
       const logs = Array.isArray(pendingAssistant.searchProgressLogs) ? [...pendingAssistant.searchProgressLogs] : []
       logs.push({ ts, message: line })
@@ -1201,7 +1234,7 @@ async function sendMessage() {
           }
         },
         onStart: () => {
-          pendingAssistant.pending = false
+          pendingAssistant.pending = true
           if (!pendingAssistant.content) pendingAssistant.content = ''
         },
         onDelta: (deltaText) => {
@@ -1247,12 +1280,20 @@ async function sendMessage() {
         },
         onSearchStatus: (data) => {
           const d = data || {}
-          const statusLine = String(d?.status || d?.phase || '').trim()
-          if (statusLine) appendSearchTaskLog({ ...d, message: `状态：${statusLine}` })
+          appendSearchTaskLog(d)
         },
         onSearchResult: (data) => {
           const d = data || {}
-          appendSearchTaskLog({ ...d, message: '检索结果已返回' })
+          appendSearchTaskLog(d)
+          const result = (d as any)?.result || {}
+          const mode = String((result as any)?.mode || '').trim().toLowerCase()
+          if (mode === 'network') {
+            const sources = Array.isArray((result as any)?.sources) ? ((result as any)?.sources as any[]) : []
+            for (const row of sources) appendSearchTaskLog(row || {})
+          } else if (mode === 'bili') {
+            const cands = Array.isArray((result as any)?.candidates) ? ((result as any)?.candidates as any[]) : []
+            for (const row of cands) appendSearchTaskLog(row || {})
+          }
         },
       },
     )
