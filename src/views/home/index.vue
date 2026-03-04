@@ -76,6 +76,25 @@
                     </div>
 
                     <div
+                      v-if="msg.role === 'assistant' && (msg.searchProgressLogs || []).length"
+                      class="mt-2 px-1"
+                    >
+                      <div class="rounded-xl p-2 search-progress-panel">
+                        <div class="text-[11px] opacity-70 mb-1">检索过程</div>
+                        <div class="space-y-1 max-h-[140px] overflow-auto">
+                          <div
+                            v-for="(lg, idx) in (msg.searchProgressLogs || []).slice(-18)"
+                            :key="`splog-${msg.localId}-${idx}`"
+                            class="text-[11px] leading-4 opacity-80 whitespace-pre-wrap break-words"
+                          >
+                            <span class="opacity-60">{{ lg.ts || '--:--:--' }}</span>
+                            <span> {{ lg.message }}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div
                       v-if="msg.role === 'assistant' && (msg.task || msg.toolDecisionReason)"
                       class="mt-2 px-1 flex flex-wrap items-center gap-2 text-xs"
                     >
@@ -297,15 +316,23 @@
                   <div class="flex items-center gap-2">
                     <button
                       type="button"
-                      class="knowledge-toggle"
-                      :class="{ 'knowledge-toggle--active': knowledgeRetrievalEnabled }"
-                      @click="knowledgeRetrievalEnabled = !knowledgeRetrievalEnabled"
+                      class="search-mode-chip"
+                      :class="{ 'search-mode-chip--active': retrievalModeNetwork }"
+                      :disabled="!knowledgeRetrievalEnabled"
+                      @click="retrievalModeNetwork = !retrievalModeNetwork"
                     >
-                      知识检索
+                      联网检索
                     </button>
-                    <span class="text-xs opacity-65">
-                      {{ knowledgeRetrievalEnabled ? '已开启：允许 AI 创建 B 站检索/转笔记任务（主题内容可直接用问句）' : '未开启：仅聊天，不创建任务；知识问答会优先尝试命中本地 MD 知识库' }}
-                    </span>
+                    <button
+                      type="button"
+                      class="search-mode-chip"
+                      :class="{ 'search-mode-chip--active': retrievalModeBili }"
+                      :disabled="!knowledgeRetrievalEnabled"
+                      @click="retrievalModeBili = !retrievalModeBili"
+                    >
+                      B站检索
+                    </button>
+
                   </div>
                 </div>
 
@@ -314,7 +341,7 @@
                   type="textarea"
                   :autosize="{ minRows: 3, maxRows: 8 }"
                   class="chat-composer-input"
-                  placeholder="先像聊天一样输入问题（如：你能帮我做什么 / 什么是LLM？）。需要执行B站检索与转笔记时，再开启上方“知识检索”（主题内容可直接用问句）。"
+                  placeholder="先像聊天一样输入问题（如：你能帮我做什么 / 什么是LLM？）。开启“知识检索”后可选择‘联网检索/B站检索’并发执行。"
                   @compositionstart="onInputCompositionStart"
                   @compositionend="onInputCompositionEnd"
                   @keydown.enter.exact.prevent="handleEnterSend"
@@ -322,10 +349,18 @@
 
                 <div class="mt-3 flex items-center justify-between gap-3">
                   <div class="text-xs opacity-70">
-                    Enter发送 · Shift+Enter换行 · 关闭“知识检索”时不会自动建任务
+                    Enter发送 · Shift+Enter换行 · 知识库不足时将按已选方式并发检索
                   </div>
                   <n-space align="center">
                     <n-button @click="clearInput" quaternary>清空</n-button>
+                    <button
+                      type="button"
+                      class="knowledge-toggle"
+                      :class="{ 'knowledge-toggle--active': knowledgeRetrievalEnabled }"
+                      @click="knowledgeRetrievalEnabled = !knowledgeRetrievalEnabled"
+                    >
+                      知识检索
+                    </button>
                     <button
                       type="button"
                       class="send-icon-btn"
@@ -461,7 +496,7 @@
 
               <div class="rail-section rail-section--plain">
                 <div class="flex items-center justify-between gap-2 mb-2">
-                  <div class="text-xs opacity-70">任务日志（最近）</div>
+                  <div class="text-xs opacity-70">任务/检索线程日志（最近）</div>
                   <n-tag size="small" type="default">{{ currentSidebarLogs.length }}</n-tag>
                 </div>
                 <div ref="sidebarLogRef" class="rail-subpanel p-2 max-h-[220px] overflow-auto">
@@ -537,7 +572,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NButton, NCard, NDropdown, NEmpty, NIcon, NInput, NSpace, NSpin, NTag, useMessage } from 'naive-ui'
 import { ArrowUpOutline, ChevronDownOutline } from '@vicons/ionicons5'
@@ -547,6 +582,7 @@ import { useAuthStore } from '@/stores/modules/useAuthStore'
 import { useGlobalStore } from '@/stores/global-store'
 import {
   createChatSessionApi,
+  listActiveSearchTasksApi,
   listChatMessagesApi,
   listChatModelsApi,
   saveChatJobNoteMessageApi,
@@ -573,6 +609,7 @@ type UiChatMessage = {
   renderAsMarkdown?: boolean
   markdownLabel?: string
   jobNoteJobId?: string
+  searchProgressLogs?: Array<{ ts?: string; message: string }>
 }
 
 const router = useRouter()
@@ -590,6 +627,8 @@ const imeComposing = ref(false)
 const messages = ref<UiChatMessage[]>([])
 const sending = ref(false)
 const knowledgeRetrievalEnabled = ref(false)
+const retrievalModeNetwork = ref(true)
+const retrievalModeBili = ref(true)
 const chatSessionUuid = ref('')
 const chatModels = ref<ChatModelItem[]>([])
 const selectedModel = ref<string | null>(null)
@@ -611,6 +650,8 @@ const currentUserLabel = computed(() => authStore.user?.display_name || authStor
 const loadingCurrentJobNote = ref(false)
 const syncingJobNoteMessageByJobId = ref<Record<string, boolean>>({})
 const childNoteLoadingByJobId = ref<Record<string, boolean>>({})
+const activeSearchTaskLogs = ref<Array<{ ts?: string; message: string }>>([])
+let searchTaskPollTimer: number | null = null
 
 const currentSseButtonText = computed(() => {
   const s = currentJobState.value?.sseStatus
@@ -649,12 +690,25 @@ const selectedModelDisplayName = computed(() => {
 
 const showTaskRail = computed(() => knowledgeRetrievalEnabled.value)
 
+const selectedSearchModes = computed(() => {
+  const modes: string[] = []
+  if (retrievalModeNetwork.value) modes.push('network')
+  if (retrievalModeBili.value) modes.push('bili')
+  return modes
+})
+
 const currentSidebarLogs = computed(() => {
-  const logs = currentJobState.value?.logs || []
-  return logs.slice(-40).map((x) => ({
+  const jobLogs = (currentJobState.value?.logs || []).slice(-40).map((x) => ({
     ts: x.ts,
     message: humanizeSidebarLog(x.message || ''),
   }))
+  const taskLogs = (activeSearchTaskLogs.value || []).slice(-80).map((x) => ({
+    ts: x.ts,
+    message: humanizeSidebarLog(x.message || ''),
+  }))
+  return [...jobLogs, ...taskLogs]
+    .sort((a, b) => String(a.ts || '').localeCompare(String(b.ts || '')))
+    .slice(-80)
 })
 
 const isCurrentJobCompleted = computed(() => currentSnapshot.value?.status === 'completed')
@@ -698,7 +752,55 @@ onMounted(async () => {
   await Promise.allSettled([bootstrapCurrentJob(), loadChatModels(), chatStore.refreshSessions().catch(() => undefined)])
   handleNewChatRouteSignal(String(route.query.newChat || ''))
   void loadSessionFromRoute(String(route.query.session || ''))
+  startSearchTaskPolling()
 })
+
+onUnmounted(() => {
+  stopSearchTaskPolling()
+})
+
+async function refreshActiveSearchTaskLogs() {
+  if (!knowledgeRetrievalEnabled.value) {
+    activeSearchTaskLogs.value = []
+    return
+  }
+  try {
+    const res = await listActiveSearchTasksApi(80)
+    const items = Array.isArray(res.items) ? res.items : []
+    const logs: Array<{ ts?: string; message: string }> = []
+    for (const item of items) {
+      const tid = String((item as any)?.task_id || '').trim()
+      const mode = String((item as any)?.mode || '').trim()
+      const taskLogs = Array.isArray((item as any)?.logs) ? ((item as any)?.logs as any[]) : []
+      for (const row of taskLogs.slice(-20)) {
+        const ts = String((row as any)?.ts || '')
+        const message = String((row as any)?.message || '').trim()
+        if (!message) continue
+        const prefix = [mode ? `[${mode}]` : '', tid ? `(${tid.slice(0, 8)})` : ''].filter(Boolean).join(' ')
+        logs.push({ ts, message: `${prefix ? `${prefix} ` : ''}${message}`.trim() })
+      }
+    }
+    activeSearchTaskLogs.value = logs.slice(-240)
+  } catch {
+    // ignore polling errors
+  }
+}
+
+function startSearchTaskPolling() {
+  stopSearchTaskPolling()
+  void refreshActiveSearchTaskLogs()
+  if (typeof window === 'undefined') return
+  searchTaskPollTimer = window.setInterval(() => {
+    void refreshActiveSearchTaskLogs()
+  }, 2500)
+}
+
+function stopSearchTaskPolling() {
+  if (searchTaskPollTimer !== null && typeof window !== 'undefined') {
+    window.clearInterval(searchTaskPollTimer)
+  }
+  searchTaskPollTimer = null
+}
 
 watch(selectedModel, (val) => {
   if (typeof window === 'undefined') return
@@ -719,6 +821,14 @@ watch(
     void loadSessionFromRoute(String(val || ''))
   },
   { flush: 'sync' },
+)
+
+watch(
+  knowledgeRetrievalEnabled,
+  () => {
+    void refreshActiveSearchTaskLogs()
+  },
+  { immediate: true },
 )
 
 watch(
@@ -806,6 +916,9 @@ function startNewConversation() {
   loadingSessionMessages.value = false
   userInput.value = ''
   knowledgeRetrievalEnabled.value = false
+  retrievalModeNetwork.value = true
+  retrievalModeBili.value = true
+  activeSearchTaskLogs.value = []
   videoPreviewState.value = {}
   candidateSelectionState.value = {}
   batchSelectingJobs.value = {}
@@ -866,6 +979,12 @@ async function loadSessionFromRoute(sessionUuidFromRoute: string) {
           ? 'Markdown 结果'
           : undefined,
       jobNoteJobId: String((m.meta as any)?.job_note?.job_id || '').trim() || undefined,
+      searchProgressLogs: Array.isArray((m.meta as any)?.search_dispatch?.logs)
+        ? (((m.meta as any)?.search_dispatch?.logs as Array<any>).map((x) => ({
+            ts: String(x?.ts || ''),
+            message: String(x?.message || ''),
+          })))
+        : [],
     }))
     messages.value = loaded
 
@@ -876,6 +995,14 @@ async function loadSessionFromRoute(sessionUuidFromRoute: string) {
     const latestTaskJobId = taskJobIds[taskJobIds.length - 1] || ''
     const shouldShowKnowledgeMode = loaded.some((m) => m.autoTask || m.task)
     knowledgeRetrievalEnabled.value = shouldShowKnowledgeMode
+    const latestAssistantWithModes = [...(res.items || [])]
+      .reverse()
+      .find((m) => String(m?.role || '') === 'assistant' && Array.isArray((m?.meta as any)?.search_modes))
+    if (latestAssistantWithModes && Array.isArray((latestAssistantWithModes.meta as any)?.search_modes)) {
+      const modes = ((latestAssistantWithModes.meta as any)?.search_modes as string[]).map((x) => String(x || '').toLowerCase())
+      retrievalModeNetwork.value = modes.includes('network')
+      retrievalModeBili.value = modes.includes('bili')
+    }
 
     if (latestTaskJobId) {
       chatStore.bindJobToSession(latestTaskJobId, sessionUuid)
@@ -917,6 +1044,7 @@ function appendUiMessage(payload: Partial<UiChatMessage> & Pick<UiChatMessage, '
     renderAsMarkdown: payload.renderAsMarkdown,
     markdownLabel: payload.markdownLabel,
     jobNoteJobId: payload.jobNoteJobId,
+    searchProgressLogs: Array.isArray(payload.searchProgressLogs) ? payload.searchProgressLogs : [],
   }
   messages.value.push(item)
   const last = messages.value[messages.value.length - 1]
@@ -945,6 +1073,12 @@ function mapAssistantMessage(msg: ChatMessage, task: JobCreateResponse | null, t
     renderAsMarkdown: isMarkdownMessage,
     markdownLabel: isMarkdownMessage ? (jobNoteFileName ? `Markdown 结果 · ${jobNoteFileName}` : 'Markdown 结果') : undefined,
     jobNoteJobId,
+    searchProgressLogs: Array.isArray((msg?.meta as any)?.search_dispatch?.logs)
+      ? (((msg?.meta as any)?.search_dispatch?.logs as Array<any>).map((x) => ({
+          ts: String(x?.ts || ''),
+          message: String(x?.message || ''),
+        })))
+      : [],
   })
 }
 
@@ -972,6 +1106,19 @@ async function sendMessage() {
     const typewriterQueue: string[] = []
     let typewriterTimer: number | null = null
     let finalDoneText = ''
+    const appendSearchTaskLog = (raw: any) => {
+      const ts = String(raw?.ts || new Date().toISOString())
+      const msg = String(raw?.message || raw?.status || '').trim()
+      if (!msg) return
+      const taskId = String(raw?.task_id || '').trim()
+      const mode = String(raw?.mode || '').trim()
+      const prefix = [mode ? `[${mode}]` : '', taskId ? `(${taskId.slice(0, 8)})` : ''].filter(Boolean).join(' ')
+      const line = `${prefix ? `${prefix} ` : ''}${msg}`.trim()
+      activeSearchTaskLogs.value = [...activeSearchTaskLogs.value, { ts, message: line }].slice(-240)
+      const logs = Array.isArray(pendingAssistant.searchProgressLogs) ? [...pendingAssistant.searchProgressLogs] : []
+      logs.push({ ts, message: line })
+      pendingAssistant.searchProgressLogs = logs.slice(-80)
+    }
 
     const stopTypewriter = () => {
       if (typewriterTimer !== null && typeof window !== 'undefined') {
@@ -1014,6 +1161,7 @@ async function sendMessage() {
         content: text,
         model_name: selectedModel.value || '',
         auto_task: knowledgeRetrievalEnabled.value,
+        search_modes: knowledgeRetrievalEnabled.value ? selectedSearchModes.value : [],
         ...(globalStore.chatTaskParams || {}),
         pipeline_model_name: selectedModel.value || '',
       },
@@ -1028,6 +1176,11 @@ async function sendMessage() {
             ? (meta.knowledge_hits as Array<Record<string, any>>)
             : []
           pendingAssistant.taskSnapshot = ((meta?.task_snapshot as Record<string, any>) || pendingAssistant.taskSnapshot || null)
+          if (Array.isArray(meta?.search_modes)) {
+            const modes = (meta.search_modes as string[]).map((x) => String(x || '').toLowerCase())
+            retrievalModeNetwork.value = modes.includes('network')
+            retrievalModeBili.value = modes.includes('bili')
+          }
           if (taskInfo?.job_id && !taskHandled) {
             taskHandled = true
             pendingAssistant.task = taskInfo
@@ -1088,6 +1241,18 @@ async function sendMessage() {
           if (Array.isArray(msg?.meta?.knowledge_hits)) {
             pendingAssistant.knowledgeHits = msg.meta.knowledge_hits as Array<Record<string, any>>
           }
+        },
+        onSearchLog: (data) => {
+          appendSearchTaskLog(data || {})
+        },
+        onSearchStatus: (data) => {
+          const d = data || {}
+          const statusLine = String(d?.status || d?.phase || '').trim()
+          if (statusLine) appendSearchTaskLog({ ...d, message: `状态：${statusLine}` })
+        },
+        onSearchResult: (data) => {
+          const d = data || {}
+          appendSearchTaskLog({ ...d, message: '检索结果已返回' })
         },
       },
     )
@@ -1805,6 +1970,55 @@ function humanizeSidebarLog(text: string) {
   background: rgba(31, 41, 55, 0.95);
   color: #e5e7eb;
   border-color: rgba(148, 163, 184, 0.25);
+}
+
+.search-mode-chip {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 26px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: #fff;
+  color: #334155;
+  transition: all 0.2s ease;
+}
+
+.search-mode-chip:hover:not(:disabled) {
+  border-color: rgba(59, 130, 246, 0.45);
+}
+
+.search-mode-chip:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.search-mode-chip--active {
+  background: rgba(37, 99, 235, 0.1);
+  color: #1d4ed8;
+  border-color: rgba(37, 99, 235, 0.45);
+}
+
+.search-progress-panel {
+  border: 1px solid rgba(203, 213, 225, 0.76);
+  background: rgba(248, 250, 252, 0.9);
+}
+
+:global(.dark) .search-mode-chip {
+  background: rgba(31, 41, 55, 0.95);
+  color: rgba(226, 232, 240, 0.92);
+  border-color: rgba(148, 163, 184, 0.25);
+}
+
+:global(.dark) .search-mode-chip--active {
+  background: rgba(59, 130, 246, 0.2);
+  color: rgba(191, 219, 254, 0.98);
+  border-color: rgba(96, 165, 250, 0.52);
+}
+
+:global(.dark) .search-progress-panel {
+  border-color: rgba(75, 85, 99, 0.72);
+  background: rgba(17, 24, 39, 0.52);
 }
 
 .home-shell {

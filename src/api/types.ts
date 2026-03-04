@@ -288,6 +288,7 @@ export interface ChatMessage {
   content: string
   meta?: {
     auto_task?: boolean
+    search_modes?: string[]
     model_name?: string | null
     tool_decision?: {
       should_create_job?: boolean
@@ -321,6 +322,12 @@ export interface ChatMessage {
       score?: number
       [key: string]: unknown
     }>
+    search_dispatch?: {
+      enabled?: boolean
+      kb_sufficient?: boolean
+      tasks?: Array<Record<string, unknown>>
+      result_count?: number
+    }
     [key: string]: unknown
   }
   created_at?: string
@@ -359,6 +366,7 @@ export interface ChatReplyRequest {
   content: string
   model_name?: string
   auto_task?: boolean
+  search_modes?: string[]
   search_limit?: number
   search_timeout?: number
   search_pages?: number
@@ -379,6 +387,12 @@ export interface ChatReplyResponse {
   tool_decision?: {
     should_create_job?: boolean
     reason?: string
+  }
+  search_dispatch?: {
+    enabled?: boolean
+    kb_sufficient?: boolean
+    tasks?: Array<Record<string, unknown>>
+    result_count?: number
   }
 }
 

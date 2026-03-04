@@ -100,6 +100,17 @@ type StreamHandlers = {
   onDelta?: (text: string, data: any) => void
   onDone?: (data: any) => void
   onSaved?: (data: any) => void
+  onSearchLog?: (data: any) => void
+  onSearchResult?: (data: any) => void
+  onSearchStatus?: (data: any) => void
+  onUnknownEvent?: (eventName: string, data: any) => void
+}
+
+export function listActiveSearchTasksApi(limit = 50) {
+  return apiRequest<{ ok: boolean; items: any[] }>(`/search/tasks/active?limit=${limit}`, {
+    method: 'GET',
+    auth: true,
+  })
 }
 
 export async function sendChatMessageStreamApi(
@@ -154,6 +165,10 @@ export async function sendChatMessageStreamApi(
     else if (eventName === 'delta') handlers.onDelta?.(String(data?.text || ''), data)
     else if (eventName === 'done') handlers.onDone?.(data)
     else if (eventName === 'saved') handlers.onSaved?.(data)
+    else if (eventName === 'search_log') handlers.onSearchLog?.(data)
+    else if (eventName === 'search_result') handlers.onSearchResult?.(data)
+    else if (eventName === 'search_status') handlers.onSearchStatus?.(data)
+    else handlers.onUnknownEvent?.(eventName, data)
   }
 
   const flushBlocks = (final = false) => {
