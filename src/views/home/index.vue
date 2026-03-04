@@ -178,7 +178,7 @@
 
                         <div class="grid grid-cols-3 gap-2">
                           <div
-                            v-for="(video, idx) in jobVideoCandidates(msg.task.job_id)"
+                            v-for="(video, idx) in pagedJobVideoCandidates(msg.task.job_id)"
                             :key="`${msg.task.job_id}-${video.url || video.title || idx}`"
                             class="rounded-xl p-2 ai-candidate-card flex flex-col"
                           >
@@ -260,6 +260,17 @@
                               />
                             </div>
                           </div>
+                        </div>
+                        <div v-if="jobVideoCandidates(msg.task.job_id).length > 10" class="mt-3 flex items-center justify-end gap-2 text-xs">
+                          <n-button size="tiny" secondary :disabled="candidateCurrentPage(msg.task.job_id) <= 1" @click="setCandidatePage(msg.task.job_id, candidateCurrentPage(msg.task.job_id) - 1)">
+                            上一页
+                          </n-button>
+                          <span class="opacity-70">
+                            第 {{ candidateCurrentPage(msg.task.job_id) }} / {{ candidateTotalPages(msg.task.job_id) }} 页
+                          </span>
+                          <n-button size="tiny" secondary :disabled="candidateCurrentPage(msg.task.job_id) >= candidateTotalPages(msg.task.job_id)" @click="setCandidatePage(msg.task.job_id, candidateCurrentPage(msg.task.job_id) + 1)">
+                            下一页
+                          </n-button>
                         </div>
                       </div>
                       <div
@@ -553,6 +564,7 @@ type UiChatMessage = {
   content: string
   pending?: boolean
   task?: JobCreateResponse | null
+  taskSnapshot?: Record<string, any> | null
   toolDecisionReason?: string
   autoTask?: boolean
   knowledgeLookupUsed?: boolean
@@ -591,6 +603,7 @@ const videoPreviewState = ref<Record<string, string>>({})
 const selectingVideoState = ref<Record<string, boolean>>({})
 const candidateSelectionState = ref<Record<string, Record<string, boolean>>>({})
 const batchSelectingJobs = ref<Record<string, boolean>>({})
+const candidatePageState = ref<Record<string, number>>({})
 
 const currentJobState = computed(() => (jobsStore.currentJobId ? jobsStore.jobs[jobsStore.currentJobId] : null))
 const currentSnapshot = computed(() => currentJobState.value?.snapshot || null)
@@ -662,6 +675,16 @@ const firstTaskMessageLocalIdByJob = computed(() => {
     if (!m[jobId]) m[jobId] = msg.localId
   }
   return m
+})
+const taskSnapshotByJob = computed(() => {
+  const out: Record<string, Record<string, any>> = {}
+  for (const msg of messages.value) {
+    const jobId = String(msg?.task?.job_id || '').trim()
+    if (!jobId) continue
+    const snap = msg.taskSnapshot
+    if (snap && typeof snap === 'object') out[jobId] = snap
+  }
+  return out
 })
 
 onMounted(async () => {
@@ -786,6 +809,7 @@ function startNewConversation() {
   videoPreviewState.value = {}
   candidateSelectionState.value = {}
   batchSelectingJobs.value = {}
+  candidatePageState.value = {}
 }
 
 function resetCurrentTaskState() {
@@ -819,6 +843,7 @@ async function loadSessionFromRoute(sessionUuidFromRoute: string) {
   try {
     loadingSessionMessages.value = true
     messages.value = []
+    candidatePageState.value = {}
     chatStore.setCurrentSession(sessionUuid)
     chatSessionUuid.value = sessionUuid
     const res = await listChatMessagesApi(sessionUuid, 100)
@@ -828,6 +853,7 @@ async function loadSessionFromRoute(sessionUuidFromRoute: string) {
       content: String(m.content || ''),
       pending: false,
       task: (m.meta?.task as JobCreateResponse | null) ?? null,
+      taskSnapshot: ((m.meta as any)?.task_snapshot as Record<string, any> | null) ?? null,
       toolDecisionReason: String(m.meta?.tool_decision?.reason || '').trim() || undefined,
       autoTask: Boolean(m.meta?.auto_task),
       knowledgeLookupUsed: Boolean(m.meta?.knowledge_lookup?.used),
@@ -882,6 +908,7 @@ function appendUiMessage(payload: Partial<UiChatMessage> & Pick<UiChatMessage, '
     content: payload.content,
     pending: payload.pending,
     task: payload.task ?? null,
+    taskSnapshot: payload.taskSnapshot ?? null,
     toolDecisionReason: payload.toolDecisionReason,
     autoTask: payload.autoTask,
     knowledgeLookupUsed: payload.knowledgeLookupUsed,
@@ -908,6 +935,7 @@ function mapAssistantMessage(msg: ChatMessage, task: JobCreateResponse | null, t
     role: 'assistant',
     content: String(msg?.content || fallbackText),
     task: effectiveTask,
+    taskSnapshot: ((msg?.meta as any)?.task_snapshot as Record<string, any> | null) ?? null,
     toolDecisionReason:
       String(toolDecision?.reason || msg?.meta?.tool_decision?.reason || '').trim() || undefined,
     autoTask: Boolean(msg?.meta?.auto_task),
@@ -999,6 +1027,7 @@ async function sendMessage() {
           pendingAssistant.knowledgeHits = Array.isArray(meta?.knowledge_hits)
             ? (meta.knowledge_hits as Array<Record<string, any>>)
             : []
+          pendingAssistant.taskSnapshot = ((meta?.task_snapshot as Record<string, any>) || pendingAssistant.taskSnapshot || null)
           if (taskInfo?.job_id && !taskHandled) {
             taskHandled = true
             pendingAssistant.task = taskInfo
@@ -1050,6 +1079,9 @@ async function sendMessage() {
               chatStore.bindJobToSession(pendingAssistant.task.job_id, chatSessionUuid.value)
             }
           }
+          if ((msg?.meta as any)?.task_snapshot) {
+            pendingAssistant.taskSnapshot = (msg?.meta as any).task_snapshot as Record<string, any>
+          }
           pendingAssistant.knowledgeLookupUsed = Boolean(msg?.meta?.knowledge_lookup?.used) || pendingAssistant.knowledgeLookupUsed
           pendingAssistant.knowledgeLookupReason =
             String(msg?.meta?.knowledge_lookup?.reason || '').trim() || pendingAssistant.knowledgeLookupReason
@@ -1090,6 +1122,9 @@ async function sendMessage() {
               String(lastAssistant?.meta?.knowledge_lookup?.reason || '').trim() || pendingAssistant.knowledgeLookupReason
             if (Array.isArray(lastAssistant?.meta?.knowledge_hits)) {
               pendingAssistant.knowledgeHits = lastAssistant.meta.knowledge_hits as Array<Record<string, any>>
+            }
+            if ((lastAssistant?.meta as any)?.task_snapshot) {
+              pendingAssistant.taskSnapshot = (lastAssistant?.meta as any)?.task_snapshot as Record<string, any>
             }
           }
         } catch {
@@ -1152,7 +1187,9 @@ function openJob(id: string) {
 function jobVideoCandidates(jobId: string): TopicSelectedVideo[] {
   const result = jobsStore.jobs[jobId]?.snapshot?.result as any
   const items = result?.selected_videos
-  return Array.isArray(items) ? (items as TopicSelectedVideo[]) : []
+  if (Array.isArray(items)) return items as TopicSelectedVideo[]
+  const fallback = taskSnapshotByJob.value[jobId]?.selected_videos
+  return Array.isArray(fallback) ? (fallback as TopicSelectedVideo[]) : []
 }
 
 function jobQueueBatch(jobId: string): TopicQueueBatchSummary | null {
@@ -1175,7 +1212,9 @@ function candidateQueueItem(jobId: string, video: TopicSelectedVideo) {
 
 function isTopicTask(jobId: string) {
   const kind = String(jobsStore.jobs[jobId]?.snapshot?.kind || '')
-  return kind === 'topic'
+  if (kind === 'topic') return true
+  const fallbackKind = String(taskSnapshotByJob.value[jobId]?.kind || '')
+  return fallbackKind === 'topic'
 }
 
 function isJobTerminal(jobId: string) {
@@ -1187,8 +1226,41 @@ function shouldRenderCandidatePanel(msg: UiChatMessage) {
   const jobId = String(msg?.task?.job_id || '').trim()
   if (!jobId) return false
   if (firstTaskMessageLocalIdByJob.value[jobId] !== msg.localId) return false
-  if (isJobTerminal(jobId)) return false
+  if (isJobTerminal(jobId) && !jobVideoCandidates(jobId).length) return false
   return true
+}
+
+function candidatePageSize() {
+  return 10
+}
+
+function candidateTotalPages(jobId: string) {
+  const total = jobVideoCandidates(jobId).length
+  return Math.max(1, Math.ceil(total / candidatePageSize()))
+}
+
+function candidateCurrentPage(jobId: string) {
+  const totalPages = candidateTotalPages(jobId)
+  const current = Math.max(1, Number(candidatePageState.value[jobId] || 1))
+  if (current > totalPages) {
+    candidatePageState.value[jobId] = totalPages
+    return totalPages
+  }
+  return current
+}
+
+function setCandidatePage(jobId: string, page: number) {
+  const totalPages = candidateTotalPages(jobId)
+  const nextPage = Math.max(1, Math.min(totalPages, Number(page || 1)))
+  candidatePageState.value = { ...candidatePageState.value, [jobId]: nextPage }
+}
+
+function pagedJobVideoCandidates(jobId: string) {
+  const all = jobVideoCandidates(jobId)
+  const page = candidateCurrentPage(jobId)
+  const size = candidatePageSize()
+  const start = (page - 1) * size
+  return all.slice(start, start + size)
 }
 
 function videoPreviewKey(video: TopicSelectedVideo) {

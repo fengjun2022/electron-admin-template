@@ -63,7 +63,7 @@
                 <div class="grid grid-cols-2 gap-3">
                   <div>
                     <div class="text-xs mb-1" :style="{ color: themeColors.textSecondary }">目标视频数</div>
-                    <NInputNumber v-model:value="chatTaskParams.topic_target_videos" :min="1" :max="20" class="w-full" />
+                    <NInputNumber v-model:value="chatTaskParams.topic_target_videos" :min="1" class="w-full" />
                   </div>
                   <div>
                     <div class="text-xs mb-1" :style="{ color: themeColors.textSecondary }">最大检索轮次</div>

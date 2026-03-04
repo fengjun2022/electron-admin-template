@@ -294,6 +294,16 @@ export interface ChatMessage {
       reason?: string
     }
     task?: JobCreateResponse | null
+    task_snapshot?: {
+      job_id?: string
+      kind?: string
+      status?: string
+      task_state?: string
+      video_count?: number
+      selected_videos?: TopicSelectedVideo[]
+      queue_batch?: TopicQueueBatchSummary | null
+      result?: Record<string, unknown> | null
+    } | null
     knowledge_lookup?: {
       used?: boolean
       reason?: string
