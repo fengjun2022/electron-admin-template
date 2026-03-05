@@ -151,11 +151,32 @@ const html = computed(() => {
 
 .md-content :deep(a) {
   color: #2563eb;
-  text-decoration: none;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .md-content :deep(a:hover) {
-  text-decoration: underline;
+  text-decoration-thickness: 2px;
+}
+
+.md-content :deep(li a) {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(59, 130, 246, 0.32);
+  background: rgba(37, 99, 235, 0.08);
+  color: #1d4ed8;
+  font-size: 0.82rem;
+  line-height: 1.3;
+  text-decoration: none;
+}
+
+.md-content :deep(li a:hover) {
+  background: rgba(37, 99, 235, 0.14);
+  border-color: rgba(37, 99, 235, 0.48);
+  text-decoration: none;
 }
 
 :global(.dark) .md-content :deep(code) {
@@ -192,5 +213,16 @@ const html = computed(() => {
 
 :global(.dark) .md-content :deep(a) {
   color: #93c5fd;
+}
+
+:global(.dark) .md-content :deep(li a) {
+  color: #bfdbfe;
+  border-color: rgba(96, 165, 250, 0.42);
+  background: rgba(30, 64, 175, 0.28);
+}
+
+:global(.dark) .md-content :deep(li a:hover) {
+  background: rgba(59, 130, 246, 0.3);
+  border-color: rgba(147, 197, 253, 0.58);
 }
 </style>

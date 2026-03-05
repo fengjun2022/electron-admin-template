@@ -15,7 +15,24 @@
                   </button>
                 </n-dropdown>
               </div>
-              <div class="text-xs opacity-60 shrink-0">{{ modelsLoading ? '模型加载中...' : '' }}</div>
+              <div class="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  class="rail-toggle-btn"
+                  :class="{ 'rail-toggle-btn--active': showTaskRail }"
+                  :title="showTaskRail ? '收起任务栏' : '展开任务栏'"
+                  @click="toggleTaskRail"
+                >
+                  <n-icon
+                    :component="ChevronForwardOutline"
+                    size="14"
+                    class="rail-toggle-btn__icon"
+                    :class="{ 'rail-toggle-btn__icon--open': showTaskRail }"
+                  />
+                  <span class="text-xs">{{ showTaskRail ? '收起任务栏' : '任务栏' }}</span>
+                </button>
+                <div class="text-xs opacity-60 shrink-0">{{ modelsLoading ? '模型加载中...' : '' }}</div>
+              </div>
             </div>
 
             <div ref="messagesContainerRef" class="flex-1 min-h-0 overflow-auto px-1 py-1">
@@ -55,7 +72,7 @@
                       class="rounded-2xl px-4 py-3 message-bubble"
                       :class="[
                         msg.role === 'user' ? 'message-user' : 'message-assistant max-w-[90%]',
-                        msg.renderAsMarkdown ? 'message-bubble--markdown' : 'whitespace-pre-wrap break-words',
+                        msg.renderAsMarkdown && !msg.streaming ? 'message-bubble--markdown' : 'whitespace-pre-wrap break-words',
                         msg.pending ? 'message-pending' : '',
                         msg.pending ? 'opacity-70' : '',
                       ]"
@@ -66,46 +83,36 @@
                           <i></i><i></i><i></i>
                         </span>
                       </div>
-                      <div v-else-if="msg.renderAsMarkdown">
+                      <div v-else-if="msg.renderAsMarkdown && !msg.streaming">
                         <div v-if="msg.markdownLabel" class="text-[11px] opacity-60 mb-2">
                           {{ msg.markdownLabel }}
                         </div>
                         <MarkdownContent :source="msg.content" />
                       </div>
-                      <div v-else>{{ msg.content }}</div>
+                      <div v-else class="whitespace-pre-wrap break-words">{{ msg.content }}</div>
                     </div>
 
                     <div
-                      v-if="msg.role === 'assistant' && (msg.searchProgressLogs || []).length"
+                      v-if="msg.role === 'assistant' && msg.searchProgressVisible"
                       class="mt-2 px-1"
                     >
                       <div class="rounded-xl p-2 search-progress-panel">
                         <div class="text-[11px] opacity-70 mb-1">访问站点</div>
                         <div
-                          v-if="msg.searchFocusLine"
-                          class="text-[11px] leading-4 mb-2 search-focus-line truncate"
-                          :title="msg.searchFocusLine"
+                          v-if="assistantProgressLine(msg)"
+                          class="text-[11px] leading-4 search-focus-line truncate"
+                          :title="assistantProgressLine(msg)"
                         >
-                          {{ msg.searchFocusLine }}
-                        </div>
-                        <div class="space-y-1 max-h-[140px] overflow-auto">
-                          <div
-                            v-for="(lg, idx) in (msg.searchProgressLogs || []).slice(-18)"
-                            :key="`splog-${msg.localId}-${idx}`"
-                            class="text-[11px] leading-4 opacity-80 whitespace-pre-wrap break-words"
+                          <a
+                            v-if="isHttpUrl(assistantProgressLine(msg))"
+                            :href="assistantProgressLine(msg)"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            class="underline"
                           >
-                            <span class="opacity-60">{{ lg.ts || '--:--:--' }}</span>
-                            <a
-                              v-if="isHttpUrl(lg.message)"
-                              :href="lg.message"
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              class="ml-1 underline"
-                            >
-                              {{ lg.message }}
-                            </a>
-                            <span v-else> {{ lg.message }}</span>
-                          </div>
+                            {{ assistantProgressLine(msg) }}
+                          </a>
+                          <span v-else>{{ assistantProgressLine(msg) }}</span>
                         </div>
                       </div>
                     </div>
@@ -373,7 +380,7 @@
                       type="button"
                       class="knowledge-toggle"
                       :class="{ 'knowledge-toggle--active': knowledgeRetrievalEnabled }"
-                      @click="knowledgeRetrievalEnabled = !knowledgeRetrievalEnabled"
+                      @click="toggleKnowledgeRetrieval"
                     >
                       知识检索
                     </button>
@@ -591,10 +598,11 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NButton, NCard, NDropdown, NEmpty, NIcon, NInput, NSpace, NSpin, NTag, useMessage } from 'naive-ui'
-import { ArrowUpOutline, ChevronDownOutline } from '@vicons/ionicons5'
+import { ArrowUpOutline, ChevronDownOutline, ChevronForwardOutline } from '@vicons/ionicons5'
 import { useJobsStore } from '@/stores/modules/useJobsStore'
 import { useChatStore } from '@/stores/modules/useChatStore'
 import { useAuthStore } from '@/stores/modules/useAuthStore'
+import { useUserStore } from '@/stores/modules/useUserStore'
 import { useGlobalStore } from '@/stores/global-store'
 import {
   createChatSessionApi,
@@ -627,6 +635,9 @@ type UiChatMessage = {
   jobNoteJobId?: string
   searchProgressLogs?: Array<{ ts?: string; message: string }>
   searchFocusLine?: string
+  searchProgressVisible?: boolean
+  streaming?: boolean
+  preferMarkdown?: boolean
 }
 
 const router = useRouter()
@@ -635,6 +646,7 @@ const message = useMessage()
 const jobsStore = useJobsStore()
 const chatStore = useChatStore()
 const authStore = useAuthStore()
+const userStore = useUserStore()
 const globalStore = useGlobalStore()
 
 const CHAT_MODEL_STORAGE_KEY = 'robot_web_selected_chat_model'
@@ -645,7 +657,7 @@ const messages = ref<UiChatMessage[]>([])
 const sending = ref(false)
 const knowledgeRetrievalEnabled = ref(false)
 const retrievalModeNetwork = ref(true)
-const retrievalModeBili = ref(true)
+const retrievalModeBili = ref(false)
 const chatSessionUuid = ref('')
 const chatModels = ref<ChatModelItem[]>([])
 const selectedModel = ref<string | null>(null)
@@ -660,6 +672,7 @@ const selectingVideoState = ref<Record<string, boolean>>({})
 const candidateSelectionState = ref<Record<string, Record<string, boolean>>>({})
 const batchSelectingJobs = ref<Record<string, boolean>>({})
 const candidatePageState = ref<Record<string, number>>({})
+const taskRailOpen = ref(false)
 
 const currentJobState = computed(() => (jobsStore.currentJobId ? jobsStore.jobs[jobsStore.currentJobId] : null))
 const currentSnapshot = computed(() => currentJobState.value?.snapshot || null)
@@ -705,7 +718,7 @@ const selectedModelDisplayName = computed(() => {
   return model?.display_name || model?.model_name || selectedModel.value
 })
 
-const showTaskRail = computed(() => knowledgeRetrievalEnabled.value)
+const showTaskRail = computed(() => taskRailOpen.value)
 
 const selectedSearchModes = computed(() => {
   const modes: string[] = []
@@ -760,6 +773,7 @@ const taskSnapshotByJob = computed(() => {
 
 onMounted(async () => {
   globalStore.setBreadcrumbBarVisible(false)
+  syncUserSignatureFromAuth()
 
   if (typeof window !== 'undefined') {
     const cached = localStorage.getItem(CHAT_MODEL_STORAGE_KEY)
@@ -775,6 +789,55 @@ onMounted(async () => {
 onUnmounted(() => {
   stopSearchTaskPolling()
 })
+
+function sanitizeEvidenceTagText(v: string) {
+  let s = String(v || '')
+  if (!s) return ''
+  s = s.replace(/\[E\d+_\d+\]/g, '')
+  s = s.replace(/\[E\d+_\d*$/g, '')
+  s = s.replace(/\n{3,}/g, '\n\n')
+  return s
+}
+
+function sanitizeFirstStreamChunk(v: string) {
+  return String(v || '')
+    .replace(/^\uFEFF/, '')
+    .replace(/^\s*\n+/, '')
+}
+
+function syncUserSignatureFromAuth() {
+  const user = authStore.user
+  if (!user) return
+  userStore.userName = user.display_name || user.username || userStore.userName
+  const role = String(user.role || 'tryuser')
+  if (role === 'admin') {
+    userStore.personalizedSignature = '管理员'
+    return
+  }
+  if (role === 'user') {
+    userStore.personalizedSignature = '正式用户'
+    return
+  }
+  const remain = Number(user.chat_quota_remaining ?? 0)
+  userStore.personalizedSignature = remain < 0 ? '试用用户（不限次数）' : `试用用户（剩余 ${remain} 次）`
+}
+
+function applyChatQuota(meta: any) {
+  const user = authStore.user
+  if (!user) return
+  const quota = meta?.chat_quota
+  if (!quota || typeof quota !== 'object') return
+  const total = Number((quota as any).chat_quota_total)
+  const used = Number((quota as any).chat_quota_used)
+  const remaining = Number((quota as any).chat_quota_remaining)
+  authStore.user = {
+    ...user,
+    chat_quota_total: Number.isFinite(total) ? total : user.chat_quota_total,
+    chat_quota_used: Number.isFinite(used) ? used : user.chat_quota_used,
+    chat_quota_remaining: Number.isFinite(remaining) ? remaining : user.chat_quota_remaining,
+  }
+  syncUserSignatureFromAuth()
+}
 
 function isHttpUrl(v: string) {
   return /^https?:\/\/\S+$/i.test(String(v || '').trim())
@@ -853,6 +916,27 @@ function stopSearchTaskPolling() {
     window.clearInterval(searchTaskPollTimer)
   }
   searchTaskPollTimer = null
+}
+
+function assistantProgressLine(msg: UiChatMessage) {
+  const focus = String(msg.searchFocusLine || '').trim()
+  if (focus) return focus
+  const logs = Array.isArray(msg.searchProgressLogs) ? msg.searchProgressLogs : []
+  const tail = logs.length ? String(logs[logs.length - 1]?.message || '').trim() : ''
+  return tail
+}
+
+function toggleTaskRail() {
+  taskRailOpen.value = !taskRailOpen.value
+}
+
+function toggleKnowledgeRetrieval() {
+  const next = !knowledgeRetrievalEnabled.value
+  knowledgeRetrievalEnabled.value = next
+  if (next) {
+    retrievalModeNetwork.value = true
+    retrievalModeBili.value = false
+  }
 }
 
 watch(selectedModel, (val) => {
@@ -970,7 +1054,8 @@ function startNewConversation() {
   userInput.value = ''
   knowledgeRetrievalEnabled.value = false
   retrievalModeNetwork.value = true
-  retrievalModeBili.value = true
+  retrievalModeBili.value = false
+  taskRailOpen.value = false
   activeSearchTaskLogs.value = []
   videoPreviewState.value = {}
   candidateSelectionState.value = {}
@@ -1016,7 +1101,7 @@ async function loadSessionFromRoute(sessionUuidFromRoute: string) {
     const loaded = (res.items || []).map((m) => ({
       localId: `srv-${m.id || Math.random().toString(36).slice(2, 8)}`,
       role: (m.role === 'assistant' ? 'assistant' : 'user') as 'assistant' | 'user',
-      content: String(m.content || ''),
+      content: (String(m.role || '') === 'assistant') ? sanitizeEvidenceTagText(String(m.content || '')) : String(m.content || ''),
       pending: false,
       task: (m.meta?.task as JobCreateResponse | null) ?? null,
       taskSnapshot: ((m.meta as any)?.task_snapshot as Record<string, any> | null) ?? null,
@@ -1043,6 +1128,9 @@ async function loadSessionFromRoute(sessionUuidFromRoute: string) {
             .filter((x) => isHttpUrl(x.message)))
         : [],
       searchFocusLine: String(((m.meta as any)?.search_dispatch?.focus_line || '')).trim() || undefined,
+      searchProgressVisible: false,
+      streaming: false,
+      preferMarkdown: false,
     }))
     messages.value = loaded
 
@@ -1104,6 +1192,9 @@ function appendUiMessage(payload: Partial<UiChatMessage> & Pick<UiChatMessage, '
     jobNoteJobId: payload.jobNoteJobId,
     searchProgressLogs: Array.isArray(payload.searchProgressLogs) ? payload.searchProgressLogs : [],
     searchFocusLine: String(payload.searchFocusLine || '').trim() || undefined,
+    searchProgressVisible: Boolean(payload.searchProgressVisible),
+    streaming: Boolean(payload.streaming),
+    preferMarkdown: Boolean(payload.preferMarkdown),
   }
   messages.value.push(item)
   const last = messages.value[messages.value.length - 1]
@@ -1122,7 +1213,7 @@ function mapAssistantMessage(msg: ChatMessage, task: JobCreateResponse | null, t
     : '抱歉，这次回复异常中断，请重试一次。'
   return appendUiMessage({
     role: 'assistant',
-    content: String(msg?.content || fallbackText),
+    content: sanitizeEvidenceTagText(String(msg?.content || fallbackText)),
     task: effectiveTask,
     taskSnapshot: ((msg?.meta as any)?.task_snapshot as Record<string, any> | null) ?? null,
     toolDecisionReason:
@@ -1143,6 +1234,9 @@ function mapAssistantMessage(msg: ChatMessage, task: JobCreateResponse | null, t
           .filter((x) => isHttpUrl(x.message)))
       : [],
     searchFocusLine: String(((msg?.meta as any)?.search_dispatch?.focus_line || '')).trim() || undefined,
+    searchProgressVisible: false,
+    streaming: false,
+    preferMarkdown: false,
   })
 }
 
@@ -1153,10 +1247,21 @@ async function sendMessage() {
     return
   }
   if (sending.value) return
+  if (knowledgeRetrievalEnabled.value && !selectedSearchModes.value.length) {
+    message.warning('请至少勾选一个检索方式（联网检索 / B站检索）')
+    return
+  }
 
   appendUiMessage({ role: 'user', content: text })
   userInput.value = ''
-  const pendingAssistant = appendUiMessage({ role: 'assistant', content: '', pending: true })
+  const pendingAssistant = appendUiMessage({
+    role: 'assistant',
+    content: '',
+    pending: true,
+    streaming: true,
+    searchProgressVisible: false,
+    preferMarkdown: false,
+  })
   sending.value = true
 
   try {
@@ -1167,14 +1272,29 @@ async function sendMessage() {
     let taskHandled = false
     let gotAnyDelta = false
     let savedAssistantContent = ''
-    const typewriterQueue: string[] = []
+    let typewriterBuffer = ''
     let typewriterTimer: number | null = null
     let finalDoneText = ''
+    let streamStarted = false
+    let shouldHideSearchProgress = false
+
+    const TYPEWRITER_INTERVAL_MS = 22
+
+    const typewriterBatchSize = () => {
+      const len = typewriterBuffer.length
+      if (len > 240) return 10
+      if (len > 120) return 6
+      if (len > 40) return 4
+      return 2
+    }
+
     const applySearchFocus = (raw: any) => {
       const line = String(raw?.line || '').trim()
       if (!line) return
       pendingAssistant.searchFocusLine = line
+      pendingAssistant.searchProgressVisible = true
     }
+
     const appendSearchTaskLog = (raw: any) => {
       const ts = String(raw?.ts || new Date().toISOString())
       const msg = pickUrlFromLogRow(raw)
@@ -1184,6 +1304,7 @@ async function sendMessage() {
       const logs = Array.isArray(pendingAssistant.searchProgressLogs) ? [...pendingAssistant.searchProgressLogs] : []
       logs.push({ ts, message: line })
       pendingAssistant.searchProgressLogs = logs.slice(-80)
+      pendingAssistant.searchProgressVisible = true
     }
 
     const stopTypewriter = () => {
@@ -1194,30 +1315,32 @@ async function sendMessage() {
     }
 
     const typewriterTick = () => {
-      if (!typewriterQueue.length) {
+      if (!typewriterBuffer.length) {
         stopTypewriter()
         return
       }
-      const batchSize = Math.min(3, typewriterQueue.length)
-      let chunk = ''
-      for (let i = 0; i < batchSize; i += 1) {
-        const nextChar = typewriterQueue.shift()
-        if (nextChar) chunk += nextChar
-      }
+      const batchSize = typewriterBatchSize()
+      const chunk = typewriterBuffer.slice(0, batchSize)
+      typewriterBuffer = typewriterBuffer.slice(batchSize)
       if (chunk) {
         pendingAssistant.pending = false
+        pendingAssistant.streaming = true
         pendingAssistant.content = `${pendingAssistant.content || ''}${chunk}`
+        pendingAssistant.content = sanitizeEvidenceTagText(pendingAssistant.content)
       }
-      if (!typewriterQueue.length && finalDoneText && !String(pendingAssistant.content || '').trim()) {
+      if (!typewriterBuffer.length && finalDoneText && !String(pendingAssistant.content || '').trim()) {
         pendingAssistant.content = finalDoneText
       }
     }
 
     const enqueueTypewriter = (textChunk: string) => {
-      if (!textChunk) return
-      for (const ch of textChunk) typewriterQueue.push(ch)
+      let chunk = sanitizeEvidenceTagText(String(textChunk || ''))
+      if (!streamStarted) chunk = sanitizeFirstStreamChunk(chunk)
+      if (!chunk) return
+      streamStarted = true
+      typewriterBuffer += chunk
       if (typewriterTimer === null && typeof window !== 'undefined') {
-        typewriterTimer = window.setInterval(typewriterTick, 18)
+        typewriterTimer = window.setInterval(typewriterTick, TYPEWRITER_INTERVAL_MS)
       }
     }
 
@@ -1233,6 +1356,7 @@ async function sendMessage() {
       },
       {
         onMeta: (meta) => {
+          applyChatQuota(meta)
           taskInfo = (meta?.task as JobCreateResponse | null) || null
           shouldCreateJob = Boolean(meta?.tool_decision?.should_create_job)
           toolDecisionReason = String(meta?.tool_decision?.reason || '').trim()
@@ -1248,8 +1372,9 @@ async function sendMessage() {
             retrievalModeBili.value = modes.includes('bili')
           }
           if (Boolean((meta as any)?.search_dispatch?.enabled)) {
-            pendingAssistant.renderAsMarkdown = true
+            pendingAssistant.preferMarkdown = true
             pendingAssistant.markdownLabel = pendingAssistant.markdownLabel || '知识整合文档'
+            pendingAssistant.searchProgressVisible = true
           }
           if (taskInfo?.job_id && !taskHandled) {
             taskHandled = true
@@ -1272,8 +1397,12 @@ async function sendMessage() {
         },
         onStart: () => {
           pendingAssistant.pending = true
+          pendingAssistant.streaming = true
           if (!pendingAssistant.content) pendingAssistant.content = ''
-          pendingAssistant.searchFocusLine = '浏览中：准备检索网页'
+          if (knowledgeRetrievalEnabled.value) {
+            pendingAssistant.searchFocusLine = '浏览中：准备检索网页'
+            pendingAssistant.searchProgressVisible = true
+          }
         },
         onDelta: (deltaText) => {
           gotAnyDelta = gotAnyDelta || !!deltaText
@@ -1282,10 +1411,11 @@ async function sendMessage() {
         },
         onDone: (doneData) => {
           pendingAssistant.pending = false
-          finalDoneText = String(doneData?.text || '')
+          finalDoneText = sanitizeEvidenceTagText(String(doneData?.text || ''))
           pendingAssistant.searchFocusLine = pendingAssistant.searchFocusLine || '总结中：已完成'
-          if (!gotAnyDelta && String(doneData?.text || '')) {
-            pendingAssistant.content = String(doneData.text)
+          shouldHideSearchProgress = true
+          if (!gotAnyDelta && finalDoneText) {
+            pendingAssistant.content = finalDoneText
           }
           if (knowledgeRetrievalEnabled.value && !taskInfo && !shouldCreateJob) {
             message.info('本次未创建任务：AI 判断为普通对话/咨询')
@@ -1293,10 +1423,11 @@ async function sendMessage() {
         },
         onSaved: (savedData) => {
           const msg = (savedData?.assistant_message || null) as ChatMessage | null
-          savedAssistantContent = String(msg?.content || '')
+          savedAssistantContent = sanitizeEvidenceTagText(String(msg?.content || ''))
+          applyChatQuota(msg?.meta || {})
           const messageKind = String(msg?.meta?.message_kind || '')
           if (Boolean(msg?.meta?.render_markdown) || ['job_markdown', 'search_markdown'].includes(messageKind)) {
-            pendingAssistant.renderAsMarkdown = true
+            pendingAssistant.preferMarkdown = true
             if (!pendingAssistant.markdownLabel && messageKind === 'search_markdown') {
               pendingAssistant.markdownLabel = '知识整合文档'
             }
@@ -1348,17 +1479,23 @@ async function sendMessage() {
     )
 
     pendingAssistant.pending = false
+    pendingAssistant.streaming = false
     pendingAssistant.toolDecisionReason = toolDecisionReason || pendingAssistant.toolDecisionReason
     if (typewriterTimer !== null) {
-      // 若流结束时还有少量排队字符，快速刷完，避免“思考中”后半截丢失。
-      while (typewriterQueue.length) typewriterTick()
+      while (typewriterBuffer.length) typewriterTick()
       stopTypewriter()
+    }
+    pendingAssistant.content = sanitizeEvidenceTagText(pendingAssistant.content || '')
+    if (pendingAssistant.preferMarkdown) pendingAssistant.renderAsMarkdown = true
+    if (shouldHideSearchProgress) {
+      pendingAssistant.searchProgressVisible = false
+      pendingAssistant.searchFocusLine = undefined
     }
 
     if (!String(pendingAssistant.content || '').trim()) {
       const pendingTaskJobId = String((pendingAssistant.task as any)?.job_id || '').trim()
       if (String(savedAssistantContent || '').trim()) {
-        pendingAssistant.content = savedAssistantContent
+        pendingAssistant.content = sanitizeEvidenceTagText(savedAssistantContent)
       } else if (pendingTaskJobId) {
         pendingAssistant.content = `已创建任务（${pendingTaskJobId}），我会继续检索并实时同步进度。`
       } else {
@@ -1366,7 +1503,7 @@ async function sendMessage() {
           const latest = await listChatMessagesApi(sessionUuid, 20)
           const items = Array.isArray(latest?.items) ? latest.items : []
           const lastAssistant = [...items].reverse().find((x) => String(x?.role || '') === 'assistant')
-          const recovered = String(lastAssistant?.content || '').trim()
+          const recovered = sanitizeEvidenceTagText(String(lastAssistant?.content || '')).trim()
           if (recovered) {
             pendingAssistant.content = recovered
             const lk = String((lastAssistant?.meta as any)?.message_kind || '')
@@ -1405,9 +1542,16 @@ async function sendMessage() {
     })
     void chatStore.refreshSessions().catch(() => undefined)
   } catch (e: any) {
-    // 若流式中断，停止打字机队列
     pendingAssistant.pending = false
+    pendingAssistant.streaming = false
+    pendingAssistant.searchProgressVisible = false
     pendingAssistant.content = `发送失败：${e?.message || '未知错误'}`
+    const errText = String(e?.message || '')
+    if (/额度|quota|chat_quota|次数/.test(errText)) {
+      void authStore.fetchMe().then(() => {
+        syncUserSignatureFromAuth()
+      }).catch(() => undefined)
+    }
     message.error(e?.message || '发送失败')
   } finally {
     sending.value = false
@@ -2096,6 +2240,39 @@ function humanizeSidebarLog(text: string) {
   border-color: rgba(37, 99, 235, 0.45);
 }
 
+.rail-toggle-btn {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 26px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: #fff;
+  color: #334155;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.rail-toggle-btn:hover {
+  border-color: rgba(59, 130, 246, 0.45);
+}
+
+.rail-toggle-btn--active {
+  background: rgba(37, 99, 235, 0.1);
+  color: #1d4ed8;
+  border-color: rgba(37, 99, 235, 0.45);
+}
+
+.rail-toggle-btn__icon {
+  transition: transform 0.2s ease;
+}
+
+.rail-toggle-btn__icon--open {
+  transform: rotate(180deg);
+}
+
 .search-progress-panel {
   border: 1px solid rgba(203, 213, 225, 0.76);
   background: rgba(248, 250, 252, 0.9);
@@ -2112,6 +2289,18 @@ function humanizeSidebarLog(text: string) {
 }
 
 :global(.dark) .search-mode-chip--active {
+  background: rgba(59, 130, 246, 0.2);
+  color: rgba(191, 219, 254, 0.98);
+  border-color: rgba(96, 165, 250, 0.52);
+}
+
+:global(.dark) .rail-toggle-btn {
+  background: rgba(31, 41, 55, 0.95);
+  color: rgba(226, 232, 240, 0.92);
+  border-color: rgba(148, 163, 184, 0.25);
+}
+
+:global(.dark) .rail-toggle-btn--active {
   background: rgba(59, 130, 246, 0.2);
   color: rgba(191, 219, 254, 0.98);
   border-color: rgba(96, 165, 250, 0.52);
