@@ -72,7 +72,7 @@
                       class="rounded-2xl px-4 py-3 message-bubble"
                       :class="[
                         msg.role === 'user' ? 'message-user' : 'message-assistant max-w-[90%]',
-                        msg.renderAsMarkdown && !msg.streaming ? 'message-bubble--markdown' : 'whitespace-pre-wrap break-words',
+                        msg.renderAsMarkdown ? 'message-bubble--markdown' : 'whitespace-pre-wrap break-words',
                         msg.pending ? 'message-pending' : '',
                         msg.pending ? 'opacity-70' : '',
                       ]"
@@ -83,7 +83,7 @@
                           <i></i><i></i><i></i>
                         </span>
                       </div>
-                      <div v-else-if="msg.renderAsMarkdown && !msg.streaming">
+                      <div v-else-if="msg.renderAsMarkdown">
                         <div v-if="msg.markdownLabel" class="text-[11px] opacity-60 mb-2">
                           {{ msg.markdownLabel }}
                         </div>
