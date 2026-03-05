@@ -772,6 +772,11 @@ function isHttpUrl(v: string) {
   return /^https?:\/\/\S+$/i.test(String(v || '').trim())
 }
 
+function isRetryNotice(v: string) {
+  const s = String(v || '').trim()
+  return s.includes('网络超时重试中')
+}
+
 function extractFirstUrl(text: string) {
   const raw = String(text || '').trim()
   if (!raw) return ''
@@ -789,9 +794,17 @@ function pickUrlFromLogRow(row: any) {
     if (fromMsg) return fromMsg
     const fromResult = extractFirstUrl(String((row as any)?.result?.url || ''))
     if (fromResult) return fromResult
+    const msgText = String((row as any)?.message || '').trim()
+    if (isRetryNotice(msgText)) return msgText
+    const detailText = String((row as any)?.detail || '').trim()
+    if (isRetryNotice(detailText)) return detailText
     return ''
   }
-  return extractFirstUrl(String(row || ''))
+  const raw = String(row || '')
+  const asUrl = extractFirstUrl(raw)
+  if (asUrl) return asUrl
+  if (isRetryNotice(raw)) return raw.trim()
+  return ''
 }
 
 async function refreshActiveSearchTaskLogs() {
@@ -1145,7 +1158,7 @@ async function sendMessage() {
     const appendSearchTaskLog = (raw: any) => {
       const ts = String(raw?.ts || new Date().toISOString())
       const msg = pickUrlFromLogRow(raw)
-      if (!msg || !isHttpUrl(msg)) return
+      if (!msg || (!isHttpUrl(msg) && !isRetryNotice(msg))) return
       const line = msg
       activeSearchTaskLogs.value = [...activeSearchTaskLogs.value, { ts, message: line }].slice(-240)
       const logs = Array.isArray(pendingAssistant.searchProgressLogs) ? [...pendingAssistant.searchProgressLogs] : []
