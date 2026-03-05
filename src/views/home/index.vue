@@ -364,7 +364,7 @@
                   type="textarea"
                   :autosize="{ minRows: 3, maxRows: 8 }"
                   class="chat-composer-input"
-                  placeholder="先像聊天一样输入问题（如：你能帮我做什么 / 什么是LLM？）。开启“知识检索”后可选择‘联网检索/B站检索’并发执行。"
+                  placeholder="像聊天一样输入问题（如：你能帮我做什么 / 什么是LLM？）"
                   @compositionstart="onInputCompositionStart"
                   @compositionend="onInputCompositionEnd"
                   @keydown.enter.exact.prevent="handleEnterSend"

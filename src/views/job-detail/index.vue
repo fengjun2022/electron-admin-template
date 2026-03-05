@@ -582,8 +582,10 @@ function humanizeLogMessage(message: string) {
   m = m
     .replace(/^任务已创建\s*\(queued\)/, '任务已创建，正在排队准备执行')
     .replace(/^Playwright 打开 B站搜索页[:：]?/i, '正在打开 B站搜索页面')
-    .replace(/^抓取搜索结果[:：]?/i, '正在抓取搜索结果')
-    .replace(/^第 \d+ 页抓取候选[:：]?/i, (s) => s.replace('抓取候选', '已抓取候选'))
+    .replace(/^抓取搜索结果[:：]?/i, '正在查询搜索结果')
+    .replace(/^查询搜索结果[:：]?/i, '正在查询搜索结果')
+    .replace(/^第 \d+ 页抓取候选[:：]?/i, (s) => s.replace('抓取候选', '已查询候选'))
+    .replace(/^第 \d+ 页查询候选[:：]?/i, (s) => s.replace('查询候选', '已查询候选'))
     .replace(/^AI 粗筛完成[:：]?/i, 'AI 已完成初步筛选：')
     .replace(/^AI 当前选择/i, 'AI 已选出一批更匹配的视频：')
     .replace(/^开始处理选中视频/i, '开始处理已选视频')
