@@ -795,14 +795,90 @@ function sanitizeEvidenceTagText(v: string) {
   if (!s) return ''
   s = s.replace(/\[E\d+_\d+\]/g, '')
   s = s.replace(/\[E\d+_\d*$/g, '')
+  s = mergeDuplicateReferenceSections(s)
   s = s.replace(/\n{3,}/g, '\n\n')
   return s
+}
+
+function mergeDuplicateReferenceSections(raw: string) {
+  const text = String(raw || '')
+  if (!text.trim()) return ''
+  const lines = text.split('\n')
+  const headingRef = /^\s{0,3}#{2,6}\s*参考来源\s*[:：]?\s*$/i
+  const headingAny = /^\s{0,3}#{1,6}\s+\S/
+  const linkRe = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g
+  const ranges: Array<[number, number]> = []
+  const refs: Array<{ title: string; url: string }> = []
+  const seen = new Set<string>()
+
+  let i = 0
+  while (i < lines.length) {
+    if (!headingRef.test(lines[i] || '')) {
+      i += 1
+      continue
+    }
+    let j = i + 1
+    while (j < lines.length && !headingAny.test(lines[j] || '')) j += 1
+    const block = lines.slice(i + 1, j)
+    for (const ln of block) {
+      let m: RegExpExecArray | null = null
+      linkRe.lastIndex = 0
+      while ((m = linkRe.exec(ln))) {
+        const title = String(m[1] || '').trim() || '来源'
+        const url = String(m[2] || '').trim()
+        const key = url.toLowerCase()
+        if (!url || seen.has(key)) continue
+        seen.add(key)
+        refs.push({ title, url })
+      }
+    }
+    ranges.push([i, j])
+    i = j
+  }
+
+  if (!ranges.length || ranges.length === 1) return text
+
+  const kept: string[] = []
+  let idx = 0
+  for (const [st, ed] of ranges) {
+    while (idx < st) {
+      kept.push(lines[idx] || '')
+      idx += 1
+    }
+    idx = Math.max(idx, ed)
+  }
+  while (idx < lines.length) {
+    kept.push(lines[idx] || '')
+    idx += 1
+  }
+  while (kept.length && !String(kept[kept.length - 1] || '').trim()) kept.pop()
+  if (refs.length) {
+    if (kept.length) kept.push('')
+    kept.push('## 参考来源')
+    kept.push('')
+    refs.forEach((it, n) => {
+      kept.push(`${n + 1}. [${it.title}](${it.url})`)
+    })
+  }
+  return kept.join('\n').trim()
 }
 
 function sanitizeFirstStreamChunk(v: string) {
   return String(v || '')
     .replace(/^\uFEFF/, '')
     .replace(/^\s*\n+/, '')
+}
+
+function looksLikeMarkdownContent(v: string) {
+  const s = String(v || '').trim()
+  if (!s) return false
+  if (/(^|\n)\s*#{2,6}\s+\S/m.test(s)) return true
+  if (/(^|\n)\s*[-*]\s+\S/m.test(s)) return true
+  if (/(^|\n)\s*\d+\.\s+\S/m.test(s)) return true
+  if (/\[[^\]]+\]\(https?:\/\/[^\s)]+\)/.test(s)) return true
+  if (/(^|\n)\s*>\s+\S/m.test(s)) return true
+  if (/```[\s\S]*```/.test(s)) return true
+  return false
 }
 
 function syncUserSignatureFromAuth() {
@@ -1112,7 +1188,8 @@ async function loadSessionFromRoute(sessionUuidFromRoute: string) {
       knowledgeHits: Array.isArray(m.meta?.knowledge_hits) ? (m.meta?.knowledge_hits as Array<Record<string, any>>) : [],
       renderAsMarkdown:
         Boolean(m.meta?.render_markdown) ||
-        ['job_markdown', 'search_markdown'].includes(String(m.meta?.message_kind || '')),
+        ['job_markdown', 'search_markdown'].includes(String(m.meta?.message_kind || '')) ||
+        (String(m.role || '') === 'assistant' && looksLikeMarkdownContent(String(m.content || ''))),
       markdownLabel: String((m.meta as any)?.job_note?.file_name || '').trim()
         ? `Markdown 结果 · ${String((m.meta as any)?.job_note?.file_name || '').trim()}`
         : (Boolean(m.meta?.render_markdown) || String(m.meta?.message_kind || '') === 'job_markdown')
@@ -1204,7 +1281,8 @@ function appendUiMessage(payload: Partial<UiChatMessage> & Pick<UiChatMessage, '
 function mapAssistantMessage(msg: ChatMessage, task: JobCreateResponse | null, toolDecision?: { reason?: string }) {
   const isMarkdownMessage =
     Boolean(msg?.meta?.render_markdown) ||
-    ['job_markdown', 'search_markdown'].includes(String(msg?.meta?.message_kind || ''))
+    ['job_markdown', 'search_markdown'].includes(String(msg?.meta?.message_kind || '')) ||
+    looksLikeMarkdownContent(String(msg?.content || ''))
   const jobNoteJobId = String((msg?.meta as any)?.job_note?.job_id || '').trim() || undefined
   const jobNoteFileName = String((msg?.meta as any)?.job_note?.file_name || '').trim()
   const effectiveTask = task ?? (msg?.meta?.task as JobCreateResponse | null) ?? null
@@ -1414,7 +1492,7 @@ async function sendMessage() {
           finalDoneText = sanitizeEvidenceTagText(String(doneData?.text || ''))
           pendingAssistant.searchFocusLine = pendingAssistant.searchFocusLine || '总结中：已完成'
           shouldHideSearchProgress = true
-          if (!gotAnyDelta && finalDoneText) {
+          if (finalDoneText) {
             pendingAssistant.content = finalDoneText
           }
           if (knowledgeRetrievalEnabled.value && !taskInfo && !shouldCreateJob) {
@@ -1431,6 +1509,8 @@ async function sendMessage() {
             if (!pendingAssistant.markdownLabel && messageKind === 'search_markdown') {
               pendingAssistant.markdownLabel = '知识整合文档'
             }
+          } else if (looksLikeMarkdownContent(String(msg?.content || ''))) {
+            pendingAssistant.preferMarkdown = true
           }
           if (msg?.meta?.tool_decision?.reason && !toolDecisionReason) {
             toolDecisionReason = String(msg.meta.tool_decision.reason || '')
@@ -1486,7 +1566,11 @@ async function sendMessage() {
       stopTypewriter()
     }
     pendingAssistant.content = sanitizeEvidenceTagText(pendingAssistant.content || '')
-    if (pendingAssistant.preferMarkdown) pendingAssistant.renderAsMarkdown = true
+    if (pendingAssistant.preferMarkdown || looksLikeMarkdownContent(String(pendingAssistant.content || ''))) {
+      pendingAssistant.renderAsMarkdown = true
+    } else if (knowledgeRetrievalEnabled.value && String(pendingAssistant.content || '').trim()) {
+      pendingAssistant.renderAsMarkdown = true
+    }
     if (shouldHideSearchProgress) {
       pendingAssistant.searchProgressVisible = false
       pendingAssistant.searchFocusLine = undefined
@@ -1512,6 +1596,8 @@ async function sendMessage() {
               if (!pendingAssistant.markdownLabel && lk === 'search_markdown') {
                 pendingAssistant.markdownLabel = '知识整合文档'
               }
+            } else if (looksLikeMarkdownContent(String(pendingAssistant.content || ''))) {
+              pendingAssistant.renderAsMarkdown = true
             }
             if (lastAssistant?.meta?.tool_decision?.reason && !pendingAssistant.toolDecisionReason) {
               pendingAssistant.toolDecisionReason = String(lastAssistant.meta.tool_decision.reason || '').trim() || undefined
@@ -1540,6 +1626,9 @@ async function sendMessage() {
       last_message_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     })
+    void authStore.fetchMe().then(() => {
+      syncUserSignatureFromAuth()
+    }).catch(() => undefined)
     void chatStore.refreshSessions().catch(() => undefined)
   } catch (e: any) {
     pendingAssistant.pending = false
