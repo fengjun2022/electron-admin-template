@@ -81,6 +81,13 @@
                     >
                       <div class="rounded-xl p-2 search-progress-panel">
                         <div class="text-[11px] opacity-70 mb-1">访问站点</div>
+                        <div
+                          v-if="msg.searchFocusLine"
+                          class="text-[11px] leading-4 mb-2 search-focus-line truncate"
+                          :title="msg.searchFocusLine"
+                        >
+                          {{ msg.searchFocusLine }}
+                        </div>
                         <div class="space-y-1 max-h-[140px] overflow-auto">
                           <div
                             v-for="(lg, idx) in (msg.searchProgressLogs || []).slice(-18)"
@@ -619,6 +626,7 @@ type UiChatMessage = {
   markdownLabel?: string
   jobNoteJobId?: string
   searchProgressLogs?: Array<{ ts?: string; message: string }>
+  searchFocusLine?: string
 }
 
 const router = useRouter()
@@ -1034,6 +1042,7 @@ async function loadSessionFromRoute(sessionUuidFromRoute: string) {
             }))
             .filter((x) => isHttpUrl(x.message)))
         : [],
+      searchFocusLine: String(((m.meta as any)?.search_dispatch?.focus_line || '')).trim() || undefined,
     }))
     messages.value = loaded
 
@@ -1094,6 +1103,7 @@ function appendUiMessage(payload: Partial<UiChatMessage> & Pick<UiChatMessage, '
     markdownLabel: payload.markdownLabel,
     jobNoteJobId: payload.jobNoteJobId,
     searchProgressLogs: Array.isArray(payload.searchProgressLogs) ? payload.searchProgressLogs : [],
+    searchFocusLine: String(payload.searchFocusLine || '').trim() || undefined,
   }
   messages.value.push(item)
   const last = messages.value[messages.value.length - 1]
@@ -1132,6 +1142,7 @@ function mapAssistantMessage(msg: ChatMessage, task: JobCreateResponse | null, t
           }))
           .filter((x) => isHttpUrl(x.message)))
       : [],
+    searchFocusLine: String(((msg?.meta as any)?.search_dispatch?.focus_line || '')).trim() || undefined,
   })
 }
 
@@ -1159,6 +1170,11 @@ async function sendMessage() {
     const typewriterQueue: string[] = []
     let typewriterTimer: number | null = null
     let finalDoneText = ''
+    const applySearchFocus = (raw: any) => {
+      const line = String(raw?.line || '').trim()
+      if (!line) return
+      pendingAssistant.searchFocusLine = line
+    }
     const appendSearchTaskLog = (raw: any) => {
       const ts = String(raw?.ts || new Date().toISOString())
       const msg = pickUrlFromLogRow(raw)
@@ -1233,7 +1249,7 @@ async function sendMessage() {
           }
           if (Boolean((meta as any)?.search_dispatch?.enabled)) {
             pendingAssistant.renderAsMarkdown = true
-            pendingAssistant.markdownLabel = pendingAssistant.markdownLabel || '联网检索结果'
+            pendingAssistant.markdownLabel = pendingAssistant.markdownLabel || '知识整合文档'
           }
           if (taskInfo?.job_id && !taskHandled) {
             taskHandled = true
@@ -1257,6 +1273,7 @@ async function sendMessage() {
         onStart: () => {
           pendingAssistant.pending = true
           if (!pendingAssistant.content) pendingAssistant.content = ''
+          pendingAssistant.searchFocusLine = '浏览中：准备检索网页'
         },
         onDelta: (deltaText) => {
           gotAnyDelta = gotAnyDelta || !!deltaText
@@ -1266,6 +1283,7 @@ async function sendMessage() {
         onDone: (doneData) => {
           pendingAssistant.pending = false
           finalDoneText = String(doneData?.text || '')
+          pendingAssistant.searchFocusLine = pendingAssistant.searchFocusLine || '总结中：已完成'
           if (!gotAnyDelta && String(doneData?.text || '')) {
             pendingAssistant.content = String(doneData.text)
           }
@@ -1280,7 +1298,7 @@ async function sendMessage() {
           if (Boolean(msg?.meta?.render_markdown) || ['job_markdown', 'search_markdown'].includes(messageKind)) {
             pendingAssistant.renderAsMarkdown = true
             if (!pendingAssistant.markdownLabel && messageKind === 'search_markdown') {
-              pendingAssistant.markdownLabel = '联网检索结果'
+              pendingAssistant.markdownLabel = '知识整合文档'
             }
           }
           if (msg?.meta?.tool_decision?.reason && !toolDecisionReason) {
@@ -1309,6 +1327,9 @@ async function sendMessage() {
         onSearchStatus: (data) => {
           const d = data || {}
           appendSearchTaskLog(d)
+        },
+        onSearchFocus: (data) => {
+          applySearchFocus(data || {})
         },
         onSearchResult: (data) => {
           const d = data || {}
@@ -1352,7 +1373,7 @@ async function sendMessage() {
             if (Boolean(lastAssistant?.meta?.render_markdown) || ['job_markdown', 'search_markdown'].includes(lk)) {
               pendingAssistant.renderAsMarkdown = true
               if (!pendingAssistant.markdownLabel && lk === 'search_markdown') {
-                pendingAssistant.markdownLabel = '联网检索结果'
+                pendingAssistant.markdownLabel = '知识整合文档'
               }
             }
             if (lastAssistant?.meta?.tool_decision?.reason && !pendingAssistant.toolDecisionReason) {
@@ -2080,6 +2101,10 @@ function humanizeSidebarLog(text: string) {
   background: rgba(248, 250, 252, 0.9);
 }
 
+.search-focus-line {
+  color: #6b7280;
+}
+
 :global(.dark) .search-mode-chip {
   background: rgba(31, 41, 55, 0.95);
   color: rgba(226, 232, 240, 0.92);
@@ -2095,6 +2120,10 @@ function humanizeSidebarLog(text: string) {
 :global(.dark) .search-progress-panel {
   border-color: rgba(75, 85, 99, 0.72);
   background: rgba(17, 24, 39, 0.52);
+}
+
+:global(.dark) .search-focus-line {
+  color: #9ca3af;
 }
 
 .home-shell {

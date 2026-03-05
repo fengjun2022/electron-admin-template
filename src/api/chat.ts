@@ -103,6 +103,7 @@ type StreamHandlers = {
   onSearchLog?: (data: any) => void
   onSearchResult?: (data: any) => void
   onSearchStatus?: (data: any) => void
+  onSearchFocus?: (data: any) => void
   onUnknownEvent?: (eventName: string, data: any) => void
 }
 
@@ -168,6 +169,7 @@ export async function sendChatMessageStreamApi(
     else if (eventName === 'search_log') handlers.onSearchLog?.(data)
     else if (eventName === 'search_result') handlers.onSearchResult?.(data)
     else if (eventName === 'search_status') handlers.onSearchStatus?.(data)
+    else if (eventName === 'search_focus') handlers.onSearchFocus?.(data)
     else handlers.onUnknownEvent?.(eventName, data)
   }
 
