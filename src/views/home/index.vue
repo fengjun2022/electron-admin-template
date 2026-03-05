@@ -1017,7 +1017,9 @@ async function loadSessionFromRoute(sessionUuidFromRoute: string) {
       knowledgeLookupUsed: Boolean(m.meta?.knowledge_lookup?.used),
       knowledgeLookupReason: String(m.meta?.knowledge_lookup?.reason || '').trim() || undefined,
       knowledgeHits: Array.isArray(m.meta?.knowledge_hits) ? (m.meta?.knowledge_hits as Array<Record<string, any>>) : [],
-      renderAsMarkdown: Boolean(m.meta?.render_markdown) || String(m.meta?.message_kind || '') === 'job_markdown',
+      renderAsMarkdown:
+        Boolean(m.meta?.render_markdown) ||
+        ['job_markdown', 'search_markdown'].includes(String(m.meta?.message_kind || '')),
       markdownLabel: String((m.meta as any)?.job_note?.file_name || '').trim()
         ? `Markdown 结果 · ${String((m.meta as any)?.job_note?.file_name || '').trim()}`
         : (Boolean(m.meta?.render_markdown) || String(m.meta?.message_kind || '') === 'job_markdown')
@@ -1099,7 +1101,9 @@ function appendUiMessage(payload: Partial<UiChatMessage> & Pick<UiChatMessage, '
 }
 
 function mapAssistantMessage(msg: ChatMessage, task: JobCreateResponse | null, toolDecision?: { reason?: string }) {
-  const isMarkdownMessage = Boolean(msg?.meta?.render_markdown) || String(msg?.meta?.message_kind || '') === 'job_markdown'
+  const isMarkdownMessage =
+    Boolean(msg?.meta?.render_markdown) ||
+    ['job_markdown', 'search_markdown'].includes(String(msg?.meta?.message_kind || ''))
   const jobNoteJobId = String((msg?.meta as any)?.job_note?.job_id || '').trim() || undefined
   const jobNoteFileName = String((msg?.meta as any)?.job_note?.file_name || '').trim()
   const effectiveTask = task ?? (msg?.meta?.task as JobCreateResponse | null) ?? null
@@ -1227,6 +1231,10 @@ async function sendMessage() {
             retrievalModeNetwork.value = modes.includes('network')
             retrievalModeBili.value = modes.includes('bili')
           }
+          if (Boolean((meta as any)?.search_dispatch?.enabled)) {
+            pendingAssistant.renderAsMarkdown = true
+            pendingAssistant.markdownLabel = pendingAssistant.markdownLabel || '联网检索结果'
+          }
           if (taskInfo?.job_id && !taskHandled) {
             taskHandled = true
             pendingAssistant.task = taskInfo
@@ -1268,6 +1276,13 @@ async function sendMessage() {
         onSaved: (savedData) => {
           const msg = (savedData?.assistant_message || null) as ChatMessage | null
           savedAssistantContent = String(msg?.content || '')
+          const messageKind = String(msg?.meta?.message_kind || '')
+          if (Boolean(msg?.meta?.render_markdown) || ['job_markdown', 'search_markdown'].includes(messageKind)) {
+            pendingAssistant.renderAsMarkdown = true
+            if (!pendingAssistant.markdownLabel && messageKind === 'search_markdown') {
+              pendingAssistant.markdownLabel = '联网检索结果'
+            }
+          }
           if (msg?.meta?.tool_decision?.reason && !toolDecisionReason) {
             toolDecisionReason = String(msg.meta.tool_decision.reason || '')
             pendingAssistant.toolDecisionReason = toolDecisionReason || undefined
@@ -1333,6 +1348,13 @@ async function sendMessage() {
           const recovered = String(lastAssistant?.content || '').trim()
           if (recovered) {
             pendingAssistant.content = recovered
+            const lk = String((lastAssistant?.meta as any)?.message_kind || '')
+            if (Boolean(lastAssistant?.meta?.render_markdown) || ['job_markdown', 'search_markdown'].includes(lk)) {
+              pendingAssistant.renderAsMarkdown = true
+              if (!pendingAssistant.markdownLabel && lk === 'search_markdown') {
+                pendingAssistant.markdownLabel = '联网检索结果'
+              }
+            }
             if (lastAssistant?.meta?.tool_decision?.reason && !pendingAssistant.toolDecisionReason) {
               pendingAssistant.toolDecisionReason = String(lastAssistant.meta.tool_decision.reason || '').trim() || undefined
             }
