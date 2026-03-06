@@ -64,14 +64,15 @@
                     </div>
                   </template>
 
-                  <div :class="msg.role === 'user' ? 'max-w-[86%]' : 'max-w-[90%]'">
+                  <div :class="msg.role === 'user' ? 'max-w-[86%]' : 'w-full max-w-[90%]'">
                     <div class="text-xs opacity-65 mb-1 px-1">
                       {{ msg.role === 'user' ? currentUserLabel : '小知AI' }}
                     </div>
                     <div
                       class="rounded-2xl px-4 py-3 message-bubble"
                       :class="[
-                        msg.role === 'user' ? 'message-user' : 'message-assistant max-w-[90%]',
+                        msg.role === 'user' ? 'message-user' : 'message-assistant',
+                        msg.role === 'assistant' && !msg.pending ? 'message-assistant--stable' : '',
                         msg.renderAsMarkdown ? 'message-bubble--markdown' : 'whitespace-pre-wrap break-words',
                         msg.role === 'assistant' && msg.renderAsMarkdown ? 'message-bubble--quotable' : '',
                         msg.pending ? 'message-pending' : '',
@@ -91,7 +92,12 @@
                         </div>
                         <MarkdownContent :source="msg.content" />
                       </div>
-                      <div v-else-if="msg.content" class="whitespace-pre-wrap break-words">{{ msg.content }}</div>
+                      <div
+                        v-else-if="msg.content"
+                        :class="msg.role === 'assistant' ? 'message-plain-text' : 'whitespace-pre-wrap break-words'"
+                      >
+                        {{ msg.content }}
+                      </div>
                       <div v-if="msg.quote?.content" class="message-quote-chip mt-3">
                         <div class="message-quote-chip__label">{{ msg.quote.label || '引用内容' }}</div>
                         <div class="message-quote-chip__body">{{ summarizeQuote(msg.quote.content) }}</div>
@@ -1557,13 +1563,10 @@ async function loadSessionFromRoute(sessionUuidFromRoute: string) {
       knowledgeLookupUsed: Boolean(m.meta?.knowledge_lookup?.used),
       knowledgeLookupReason: String(m.meta?.knowledge_lookup?.reason || '').trim() || undefined,
       knowledgeHits: Array.isArray(m.meta?.knowledge_hits) ? (m.meta?.knowledge_hits as Array<Record<string, any>>) : [],
-      renderAsMarkdown:
-        Boolean(m.meta?.render_markdown) ||
-        ['job_markdown', 'search_markdown'].includes(String(m.meta?.message_kind || '')) ||
-        (String(m.role || '') === 'assistant' && looksLikeMarkdownContent(String(m.content || ''))),
+      renderAsMarkdown: String(m.role || '') === 'assistant',
       markdownLabel: String((m.meta as any)?.job_note?.file_name || '').trim()
         ? `Markdown 结果 · ${String((m.meta as any)?.job_note?.file_name || '').trim()}`
-        : (Boolean(m.meta?.render_markdown) || String(m.meta?.message_kind || '') === 'job_markdown')
+        : (String(m.meta?.message_kind || '') === 'job_markdown')
           ? 'Markdown 结果'
           : undefined,
       jobNoteJobId: String((m.meta as any)?.job_note?.job_id || '').trim() || undefined,
@@ -1637,7 +1640,7 @@ function appendUiMessage(payload: Partial<UiChatMessage> & Pick<UiChatMessage, '
     knowledgeLookupUsed: payload.knowledgeLookupUsed,
     knowledgeLookupReason: payload.knowledgeLookupReason,
     knowledgeHits: Array.isArray(payload.knowledgeHits) ? payload.knowledgeHits : [],
-    renderAsMarkdown: payload.renderAsMarkdown,
+    renderAsMarkdown: payload.role === 'assistant' ? true : payload.renderAsMarkdown,
     markdownLabel: payload.markdownLabel,
     jobNoteJobId: payload.jobNoteJobId,
     searchProgressLogs: Array.isArray(payload.searchProgressLogs) ? payload.searchProgressLogs : [],
@@ -1652,10 +1655,6 @@ function appendUiMessage(payload: Partial<UiChatMessage> & Pick<UiChatMessage, '
 }
 
 function mapAssistantMessage(msg: ChatMessage, task: JobCreateResponse | null, toolDecision?: { reason?: string }) {
-  const isMarkdownMessage =
-    Boolean(msg?.meta?.render_markdown) ||
-    ['job_markdown', 'search_markdown'].includes(String(msg?.meta?.message_kind || '')) ||
-    looksLikeMarkdownContent(String(msg?.content || ''))
   const jobNoteJobId = String((msg?.meta as any)?.job_note?.job_id || '').trim() || undefined
   const jobNoteFileName = String((msg?.meta as any)?.job_note?.file_name || '').trim()
   const effectiveTask = task ?? (msg?.meta?.task as JobCreateResponse | null) ?? null
@@ -1675,8 +1674,8 @@ function mapAssistantMessage(msg: ChatMessage, task: JobCreateResponse | null, t
     knowledgeLookupUsed: Boolean(msg?.meta?.knowledge_lookup?.used),
     knowledgeLookupReason: String(msg?.meta?.knowledge_lookup?.reason || '').trim() || undefined,
     knowledgeHits: Array.isArray(msg?.meta?.knowledge_hits) ? (msg?.meta?.knowledge_hits as Array<Record<string, any>>) : [],
-    renderAsMarkdown: isMarkdownMessage,
-    markdownLabel: isMarkdownMessage ? (jobNoteFileName ? `Markdown 结果 · ${jobNoteFileName}` : 'Markdown 结果') : undefined,
+    renderAsMarkdown: true,
+    markdownLabel: jobNoteFileName ? `Markdown 结果 · ${jobNoteFileName}` : undefined,
     jobNoteJobId,
     searchProgressLogs: Array.isArray((msg?.meta as any)?.search_dispatch?.logs)
       ? (((msg?.meta as any)?.search_dispatch?.logs as Array<any>)
@@ -1699,6 +1698,7 @@ async function sendMessage() {
   const images = composerImages.value
     .filter((img) => img.uploadStatus !== 'failed' && img.uploadStatus !== 'uploading' && String(img.url || '').trim())
     .map((img) => ({ ...img }))
+  const hasRichContext = Boolean(images.length || quote?.content)
   if (!text && !images.length && !quote?.content) {
     message.warning('请输入内容或上传图片')
     return
@@ -1712,7 +1712,7 @@ async function sendMessage() {
     message.warning('有图片上传失败，请重试或移除后再发送')
     return
   }
-  if (knowledgeRetrievalEnabled.value && !selectedSearchModes.value.length) {
+  if (knowledgeRetrievalEnabled.value && !hasRichContext && !selectedSearchModes.value.length) {
     message.warning('请至少勾选一个检索方式（联网检索 / B站检索）')
     return
   }
@@ -1721,13 +1721,16 @@ async function sendMessage() {
   userInput.value = ''
   composerQuote.value = null
   composerImages.value = []
+  const effectiveAutoTask = knowledgeRetrievalEnabled.value && !hasRichContext
+  const effectiveSearchModes = effectiveAutoTask ? selectedSearchModes.value : []
   const pendingAssistant = appendUiMessage({
     role: 'assistant',
     content: '',
     pending: true,
     streaming: true,
     searchProgressVisible: false,
-    preferMarkdown: false,
+    renderAsMarkdown: true,
+    preferMarkdown: true,
   })
   sending.value = true
   let shouldRevokeSentImages = false
@@ -1745,6 +1748,7 @@ async function sendMessage() {
     let finalDoneText = ''
     let streamStarted = false
     let shouldHideSearchProgress = false
+    let backendSearchDispatchEnabled = false
 
     const TYPEWRITER_INTERVAL_MS = 22
 
@@ -1819,8 +1823,8 @@ async function sendMessage() {
         images: images.map(({ previewUrl, uploadStatus, uploadProgress, errorMessage, sourceFile, localId, ...img }) => img),
         quote: quote?.content ? quote : null,
         model_name: selectedModel.value || '',
-        auto_task: knowledgeRetrievalEnabled.value,
-        search_modes: knowledgeRetrievalEnabled.value ? selectedSearchModes.value : [],
+        auto_task: effectiveAutoTask,
+        search_modes: effectiveSearchModes,
         ...(globalStore.chatTaskParams || {}),
         pipeline_model_name: selectedModel.value || '',
       },
@@ -1841,10 +1845,15 @@ async function sendMessage() {
             retrievalModeNetwork.value = modes.includes('network')
             retrievalModeBili.value = modes.includes('bili')
           }
-          if (Boolean((meta as any)?.search_dispatch?.enabled)) {
+          backendSearchDispatchEnabled = Boolean((meta as any)?.search_dispatch?.enabled)
+          if (backendSearchDispatchEnabled) {
             pendingAssistant.preferMarkdown = true
             pendingAssistant.markdownLabel = pendingAssistant.markdownLabel || '知识整合文档'
+            pendingAssistant.searchFocusLine = pendingAssistant.searchFocusLine || '浏览中：准备检索网页'
             pendingAssistant.searchProgressVisible = true
+          } else {
+            pendingAssistant.searchProgressVisible = false
+            pendingAssistant.searchFocusLine = undefined
           }
           if (taskInfo?.job_id && !taskHandled) {
             taskHandled = true
@@ -1869,10 +1878,6 @@ async function sendMessage() {
           pendingAssistant.pending = true
           pendingAssistant.streaming = true
           if (!pendingAssistant.content) pendingAssistant.content = ''
-          if (knowledgeRetrievalEnabled.value) {
-            pendingAssistant.searchFocusLine = '浏览中：准备检索网页'
-            pendingAssistant.searchProgressVisible = true
-          }
         },
         onDelta: (deltaText) => {
           gotAnyDelta = gotAnyDelta || !!deltaText
@@ -1882,12 +1887,14 @@ async function sendMessage() {
         onDone: (doneData) => {
           pendingAssistant.pending = false
           finalDoneText = sanitizeEvidenceTagText(String(doneData?.text || ''))
-          pendingAssistant.searchFocusLine = pendingAssistant.searchFocusLine || '总结中：已完成'
-          shouldHideSearchProgress = true
+          if (backendSearchDispatchEnabled) {
+            pendingAssistant.searchFocusLine = pendingAssistant.searchFocusLine || '总结中：已完成'
+            shouldHideSearchProgress = true
+          }
           if (finalDoneText) {
             pendingAssistant.content = finalDoneText
           }
-          if (knowledgeRetrievalEnabled.value && !taskInfo && !shouldCreateJob) {
+          if (effectiveAutoTask && !backendSearchDispatchEnabled && !taskInfo && !shouldCreateJob) {
             message.info('本次未创建任务：AI 判断为普通对话/咨询')
           }
         },
@@ -1896,13 +1903,12 @@ async function sendMessage() {
           savedAssistantContent = sanitizeEvidenceTagText(String(msg?.content || ''))
           applyChatQuota(msg?.meta || {})
           const messageKind = String(msg?.meta?.message_kind || '')
+          pendingAssistant.renderAsMarkdown = true
+          pendingAssistant.preferMarkdown = true
           if (Boolean(msg?.meta?.render_markdown) || ['job_markdown', 'search_markdown'].includes(messageKind)) {
-            pendingAssistant.preferMarkdown = true
             if (!pendingAssistant.markdownLabel && messageKind === 'search_markdown') {
               pendingAssistant.markdownLabel = '知识整合文档'
             }
-          } else if (looksLikeMarkdownContent(String(msg?.content || ''))) {
-            pendingAssistant.preferMarkdown = true
           }
           if (msg?.meta?.tool_decision?.reason && !toolDecisionReason) {
             toolDecisionReason = String(msg.meta.tool_decision.reason || '')
@@ -1958,9 +1964,7 @@ async function sendMessage() {
       stopTypewriter()
     }
     pendingAssistant.content = sanitizeEvidenceTagText(pendingAssistant.content || '')
-    if (pendingAssistant.preferMarkdown || looksLikeMarkdownContent(String(pendingAssistant.content || ''))) {
-      pendingAssistant.renderAsMarkdown = true
-    } else if (knowledgeRetrievalEnabled.value && String(pendingAssistant.content || '').trim()) {
+    if (pendingAssistant.preferMarkdown || pendingAssistant.role === 'assistant') {
       pendingAssistant.renderAsMarkdown = true
     }
     if (shouldHideSearchProgress) {
@@ -1983,13 +1987,13 @@ async function sendMessage() {
           if (recovered) {
             pendingAssistant.content = recovered
             const lk = String((lastAssistant?.meta as any)?.message_kind || '')
-            if (Boolean(lastAssistant?.meta?.render_markdown) || ['job_markdown', 'search_markdown'].includes(lk)) {
+            if (String(lastAssistant?.role || '') === 'assistant') {
               pendingAssistant.renderAsMarkdown = true
+            }
+            if (Boolean(lastAssistant?.meta?.render_markdown) || ['job_markdown', 'search_markdown'].includes(lk)) {
               if (!pendingAssistant.markdownLabel && lk === 'search_markdown') {
                 pendingAssistant.markdownLabel = '知识整合文档'
               }
-            } else if (looksLikeMarkdownContent(String(pendingAssistant.content || ''))) {
-              pendingAssistant.renderAsMarkdown = true
             }
             if (lastAssistant?.meta?.tool_decision?.reason && !pendingAssistant.toolDecisionReason) {
               pendingAssistant.toolDecisionReason = String(lastAssistant.meta.tool_decision.reason || '').trim() || undefined
@@ -3351,10 +3355,7 @@ function humanizeSidebarLog(text: string) {
 
 .message-bubble {
   border: 1px solid transparent;
-}
-
-.message-bubble--quotable {
-  cursor: context-menu;
+  min-width: 0;
 }
 
 .message-quote-chip {
@@ -3446,6 +3447,12 @@ function humanizeSidebarLog(text: string) {
   user-select: none;
 }
 
+.message-pending {
+  display: inline-flex;
+  width: auto;
+  max-width: max-content;
+}
+
 .thinking-indicator {
   display: inline-flex;
   align-items: center;
@@ -3499,6 +3506,16 @@ function humanizeSidebarLog(text: string) {
   background: rgba(248, 250, 252, 0.95);
   border-color: rgba(203, 213, 225, 0.65);
   box-shadow: 0 6px 18px rgba(15, 23, 42, 0.06);
+}
+
+.message-assistant--stable {
+  width: min(100%, 980px);
+}
+
+.message-plain-text {
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .ai-candidate-panel {
