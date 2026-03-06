@@ -1231,12 +1231,6 @@ function sanitizeEvidenceTagText(v: string) {
   if (!s) return ''
   s = s.replace(/\[E\d+_\d+\]/g, '')
   s = s.replace(/\[E\d+_\d*$/g, '')
-  s = mergeDuplicateReferenceSections(s)
-  s = repairLooseMarkdownTables(s)
-  s = repairMarkdownTableBlocks(s)
-  s = protectAndNormalizeTableBlocks(s, normalizeLooseMarkdown)
-  s = repairMarkdownTableBlocks(s)
-  s = s.replace(/\n{3,}/g, '\n\n')
   return s
 }
 
