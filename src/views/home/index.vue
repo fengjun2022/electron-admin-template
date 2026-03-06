@@ -1244,7 +1244,7 @@ async function bootstrapCurrentJob() {
       const snap = await jobsStore.fetchJob(jobsStore.currentJobId)
       const st = String(snap?.status || '')
       if (st === 'running' || st === 'queued' || st === 'waiting_user_pick') {
-        jobsStore.connectJobEvents(jobsStore.currentJobId)
+        jobsStore.connectJobEvents(jobsStore.currentJobId, true)
       }
     } catch {
       // ignore bootstrap errors
@@ -1254,9 +1254,8 @@ async function bootstrapCurrentJob() {
   if (jobsStore.currentJobId && currentSnapshot.value) {
     const st = String(currentSnapshot.value.status || '')
     if ((st === 'running' || st === 'queued' || st === 'waiting_user_pick')
-      && currentJobState.value?.sseStatus !== 'connected'
-      && currentJobState.value?.sseStatus !== 'connecting') {
-      jobsStore.connectJobEvents(jobsStore.currentJobId)
+      && currentJobState.value?.sseStatus !== 'connected') {
+      jobsStore.connectJobEvents(jobsStore.currentJobId, true)
     }
   }
 }
@@ -1332,8 +1331,14 @@ async function loadSessionFromRoute(sessionUuidFromRoute: string) {
     skipNextRouteSessionHydrateUuid.value = ''
     return
   }
-  if (chatSessionUuid.value === sessionUuid && messages.value.length > 0) return
+  if (chatSessionUuid.value === sessionUuid && messages.value.length > 0) {
+    await bootstrapCurrentJob()
+    return
+  }
   try {
+    const previousJobId = String(jobsStore.currentJobId || '').trim()
+    if (previousJobId) jobsStore.disconnectJobEvents(previousJobId, false)
+    jobsStore.currentJobId = ''
     loadingSessionMessages.value = true
     messages.value = []
     candidatePageState.value = {}
@@ -1404,7 +1409,7 @@ async function loadSessionFromRoute(sessionUuidFromRoute: string) {
       try {
         const snap = await jobsStore.fetchJob(latestTaskJobId)
         if (snap?.status === 'running' || snap?.status === 'queued' || snap?.status === 'waiting_user_pick') {
-          jobsStore.connectJobEvents(latestTaskJobId)
+          jobsStore.connectJobEvents(latestTaskJobId, true)
         }
       } catch {
         // ignore task bootstrap errors when restoring chat history

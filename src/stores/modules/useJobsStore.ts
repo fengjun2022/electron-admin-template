@@ -277,11 +277,11 @@ export const useJobsStore = defineStore('jobs', {
         if (jobUi.logs.length > 2000) jobUi.logs = jobUi.logs.slice(-1200)
       }
     },
-    connectJobEvents(jobId: string) {
+    connectJobEvents(jobId: string, force = false) {
       const jobUi = ensureJobUi(this.jobs, jobId)
       this._manualClosed[jobId] = false
       const existing = this._streamMap[jobId]
-      if (existing && (jobUi.sseStatus === 'connecting' || jobUi.sseStatus === 'connected')) {
+      if (!force && existing && (jobUi.sseStatus === 'connecting' || jobUi.sseStatus === 'connected')) {
         return
       }
       this.disconnectJobEvents(jobId, false)
