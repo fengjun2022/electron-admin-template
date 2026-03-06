@@ -1233,7 +1233,9 @@ function sanitizeEvidenceTagText(v: string) {
   s = s.replace(/\[E\d+_\d*$/g, '')
   s = mergeDuplicateReferenceSections(s)
   s = repairLooseMarkdownTables(s)
-  s = normalizeLooseMarkdown(s)
+  s = repairMarkdownTableBlocks(s)
+  s = protectAndNormalizeTableBlocks(s, normalizeLooseMarkdown)
+  s = repairMarkdownTableBlocks(s)
   s = s.replace(/\n{3,}/g, '\n\n')
   return s
 }
@@ -1283,6 +1285,191 @@ function repairLooseMarkdownTables(raw: string) {
   }
 
   return out.join('\n')
+}
+
+function repairMarkdownTableBlocks(raw: string) {
+  const text = String(raw || '')
+  if (!text.trim() || !text.includes('|')) return text
+  const lines = text.replace(/\r\n/g, '\n').split('\n')
+  const out: string[] = []
+  let buffer: string[] = []
+
+  const normalizeTableSegment = (segment: string) => {
+    let s = String(segment || '').trim()
+    if (!s) return ''
+    if (!s.startsWith('|')) s = `|${s}`
+    if (!s.endsWith('|')) s = `${s}|`
+    return s
+  }
+
+  const splitTableCells = (segment: string) => {
+    const normalized = normalizeTableSegment(segment)
+    if (!normalized) return [] as string[]
+    return normalized.slice(1, -1).split('|').map((cell) => String(cell || '').trim())
+  }
+
+  const looksLikeTableSegment = (segment: string) => {
+    const normalized = normalizeTableSegment(segment)
+    if (!normalized) return false
+    const pipeCount = (normalized.match(/\|/g) || []).length
+    if (pipeCount < 3) return false
+    if (/^\|\s*:?-{3,}/.test(normalized)) return true
+    return normalized.includes('|')
+  }
+
+  const looksLikeRuleLine = (segment: string) => {
+    const cells = splitTableCells(segment)
+    if (cells.length < 2) return false
+    return cells.every((cell) => /^:?-{3,}:?$/.test(cell))
+  }
+
+  const isSeparatorishTableLine = (line: string) => {
+    const s = String(line || '').trim()
+    return Boolean(s) && /^[|\-:\s]+$/.test(s) && s.includes('|')
+  }
+
+  const normalizeTableBlockLines = (block: string[]) => {
+    const rows: string[] = []
+    let pendingPrefix = ''
+    for (const line of block) {
+      const s = String(line || '').trim()
+      if (!s) continue
+      if (/^\d+$/.test(s)) {
+        pendingPrefix = s
+        continue
+      }
+      if (!s.includes('|')) {
+        continue
+      }
+      let cells = splitTableCells(s)
+      if (pendingPrefix) {
+        if (cells.length && !cells[0]) cells[0] = pendingPrefix
+        else cells = [pendingPrefix, ...cells]
+        pendingPrefix = ''
+      }
+      rows.push(`|${cells.join('|')}|`)
+    }
+    if (rows.length < 2) return block
+    const nonRuleRows = rows.filter((row) => !looksLikeRuleLine(row))
+    const colCounts = Array.from(new Set(nonRuleRows.map((row) => splitTableCells(row).length).filter((n) => n >= 2)))
+    if (colCounts.length !== 1) return block
+    const colCount = colCounts[0] || 0
+    if (colCount < 2) return block
+    const separator = `|${Array.from({ length: colCount }, () => ' --- ').join('|')}|`
+    if (looksLikeRuleLine(rows[1] || '')) {
+      if (splitTableCells(rows[1] || '').length !== colCount) rows[1] = separator
+    }
+    else {
+      rows.splice(1, 0, separator)
+    }
+    return rows
+  }
+
+  const flushBuffer = () => {
+    if (!buffer.length) return
+    out.push(...normalizeTableBlockLines(buffer))
+    buffer = []
+  }
+
+  for (const line of lines) {
+    const s = String(line || '').trim()
+    const isTableish =
+      (looksLikeTableSegment(s) && splitTableCells(s).length >= 2) ||
+      isSeparatorishTableLine(s) ||
+      /^\d+$/.test(s)
+    if (isTableish) {
+      buffer.push(line)
+      continue
+    }
+    flushBuffer()
+    out.push(line)
+  }
+  flushBuffer()
+  return out.join('\n')
+}
+
+function protectAndNormalizeTableBlocks(raw: string, normalizer: (v: string) => string) {
+  const text = String(raw || '')
+  if (!text.trim() || !text.includes('|')) return normalizer(text)
+  const lines = text.replace(/\r\n/g, '\n').split('\n')
+  const placeholders: string[][] = []
+  const rebuilt: string[] = []
+  let idx = 0
+
+  const normalizeTableSegment = (segment: string) => {
+    let s = String(segment || '').trim()
+    if (!s) return ''
+    if (!s.startsWith('|')) s = `|${s}`
+    if (!s.endsWith('|')) s = `${s}|`
+    return s
+  }
+
+  const splitTableCells = (segment: string) => {
+    const normalized = normalizeTableSegment(segment)
+    if (!normalized) return [] as string[]
+    return normalized.slice(1, -1).split('|').map((cell) => String(cell || '').trim())
+  }
+
+  const looksLikeTableSegment = (segment: string) => {
+    const normalized = normalizeTableSegment(segment)
+    if (!normalized) return false
+    const pipeCount = (normalized.match(/\|/g) || []).length
+    if (pipeCount < 3) return false
+    if (/^\|\s*:?-{3,}/.test(normalized)) return true
+    return normalized.includes('|')
+  }
+
+  const isSeparatorishTableLine = (line: string) => {
+    const s = String(line || '').trim()
+    return Boolean(s) && /^[|\-:\s]+$/.test(s) && s.includes('|')
+  }
+
+  while (idx < lines.length) {
+    const line = String(lines[idx] || '')
+    const s = line.trim()
+    const isTableish =
+      (looksLikeTableSegment(s) && splitTableCells(s).length >= 2) ||
+      isSeparatorishTableLine(s) ||
+      /^\d+$/.test(s)
+    if (!isTableish) {
+      rebuilt.push(line)
+      idx += 1
+      continue
+    }
+
+    const start = idx
+    const block: string[] = []
+    let sawPipe = s.includes('|')
+    while (idx < lines.length) {
+      const cur = String(lines[idx] || '')
+      const curS = cur.trim()
+      if (!curS) break
+      const curTableish =
+        (looksLikeTableSegment(curS) && splitTableCells(curS).length >= 2) ||
+        isSeparatorishTableLine(curS) ||
+        /^\d+$/.test(curS)
+      if (!curTableish) {
+        break
+      }
+      sawPipe = sawPipe || curS.includes('|')
+      block.push(cur)
+      idx += 1
+    }
+    if (sawPipe && block.length >= 2) {
+      placeholders.push(repairMarkdownTableBlocks(block.join('\n')).split('\n'))
+      rebuilt.push(`__MD_TABLE_BLOCK_${placeholders.length - 1}__`)
+    }
+    else {
+      rebuilt.push(...lines.slice(start, idx || start + 1))
+      if (idx === start) idx += 1
+    }
+  }
+
+  let normalized = normalizer(rebuilt.join('\n'))
+  placeholders.forEach((block, i) => {
+    normalized = normalized.replace(`__MD_TABLE_BLOCK_${i}__`, block.join('\n'))
+  })
+  return normalized
 }
 
 function normalizeLooseMarkdown(raw: string) {
