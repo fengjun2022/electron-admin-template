@@ -287,6 +287,8 @@ export interface ChatMessage {
   role: 'user' | 'assistant' | string
   content: string
   meta?: {
+    images?: ChatImageAttachment[]
+    quote?: ChatQuoteReference | null
     auto_task?: boolean
     search_modes?: string[]
     model_name?: string | null
@@ -333,6 +335,20 @@ export interface ChatMessage {
   created_at?: string
 }
 
+export interface ChatImageAttachment {
+  url: string
+  file_name?: string
+  mime_type?: string
+  size?: number | null
+  bucket?: string
+  object_name?: string
+}
+
+export interface ChatQuoteReference {
+  label?: string
+  content?: string
+}
+
 export interface ChatModelItem {
   id?: number
   model_name: string
@@ -364,6 +380,8 @@ export interface ChatMessagesResponse {
 
 export interface ChatReplyRequest {
   content: string
+  images?: ChatImageAttachment[]
+  quote?: ChatQuoteReference | null
   model_name?: string
   auto_task?: boolean
   search_modes?: string[]
@@ -377,6 +395,11 @@ export interface ChatReplyRequest {
   playwright_headless?: boolean
   search_headless?: boolean
   pipeline_model_name?: string
+}
+
+export interface ChatImageUploadResponse {
+  ok: boolean
+  image: ChatImageAttachment
 }
 
 export interface ChatReplyResponse {

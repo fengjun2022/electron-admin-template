@@ -73,9 +73,11 @@
                       :class="[
                         msg.role === 'user' ? 'message-user' : 'message-assistant max-w-[90%]',
                         msg.renderAsMarkdown ? 'message-bubble--markdown' : 'whitespace-pre-wrap break-words',
+                        msg.role === 'assistant' && msg.renderAsMarkdown ? 'message-bubble--quotable' : '',
                         msg.pending ? 'message-pending' : '',
                         msg.pending ? 'opacity-70' : '',
                       ]"
+                      @contextmenu.prevent="handleMessageContextQuote(msg)"
                     >
                       <div v-if="msg.pending" class="thinking-indicator text-sm">
                         <span class="thinking-indicator__label">浏览中</span>
@@ -89,7 +91,22 @@
                         </div>
                         <MarkdownContent :source="msg.content" />
                       </div>
-                      <div v-else class="whitespace-pre-wrap break-words">{{ msg.content }}</div>
+                      <div v-else-if="msg.content" class="whitespace-pre-wrap break-words">{{ msg.content }}</div>
+                      <div v-if="msg.quote?.content" class="message-quote-chip mt-3">
+                        <div class="message-quote-chip__label">{{ msg.quote.label || '引用内容' }}</div>
+                        <div class="message-quote-chip__body">{{ summarizeQuote(msg.quote.content) }}</div>
+                      </div>
+                      <div v-if="(msg.images || []).length" class="mt-3 flex flex-wrap gap-2">
+                        <button
+                          v-for="(img, imgIdx) in (msg.images || [])"
+                          :key="`${msg.localId}-img-${img.url}-${imgIdx}`"
+                          type="button"
+                          class="message-image-thumb"
+                          @click="openImageInNewTab(img.url)"
+                        >
+                          <img :src="img.url" :alt="img.file_name || `图片${imgIdx + 1}`" class="message-image-thumb__img" loading="lazy" />
+                        </button>
+                      </div>
                     </div>
 
                     <div
@@ -225,7 +242,11 @@
                             class="rounded-xl p-2 ai-candidate-card flex flex-col"
                           >
                             <!-- Thumbnail -->
-                            <div class="rounded-lg overflow-hidden ai-candidate-cover mb-2">
+                            <button
+                              type="button"
+                              class="rounded-lg overflow-hidden ai-candidate-cover mb-2"
+                              @click="handleCandidateCoverClick(msg.task.job_id, video)"
+                            >
                               <img
                                 v-if="videoCoverUrl(video)"
                                 :src="videoCoverUrl(video) || undefined"
@@ -237,7 +258,15 @@
                               <div v-else class="w-full aspect-video flex items-center justify-center text-xs opacity-60">
                                 暂无封面
                               </div>
-                            </div>
+                              <div
+                                v-if="videoEmbedUrl(video)"
+                                class="ai-candidate-cover__overlay"
+                              >
+                                <span class="ai-candidate-cover__play" :title="activeVideoPreviewKey(msg.task.job_id) === videoPreviewKey(video) ? '收起播放' : '播放视频'">
+                                  <n-icon :component="Play" size="22" />
+                                </span>
+                              </div>
+                            </button>
 
                             <!-- Content -->
                             <div class="min-w-0 flex-1 flex flex-col">
@@ -269,14 +298,6 @@
 
                             <div class="mt-2 flex items-center justify-end">
                               <n-space size="small">
-                                <n-button
-                                  size="tiny"
-                                  secondary
-                                  @click="toggleVideoPreview(msg.task.job_id, video)"
-                                  :disabled="!videoEmbedUrl(video)"
-                                >
-                                  {{ activeVideoPreviewKey(msg.task.job_id) === videoPreviewKey(video) ? '收起预览' : '预览' }}
-                                </n-button>
                                 <n-button
                                   size="tiny"
                                   type="primary"
@@ -334,7 +355,7 @@
             </div>
 
             <div class="pt-3">
-              <div class="rounded-[24px] composer-shell px-4 py-3">
+              <div class="rounded-[24px] composer-shell px-4 py-3" @paste.capture="handleComposerPaste">
                 <div class="mb-2 flex items-center justify-between gap-3">
                   <div class="flex items-center gap-2">
                     <button
@@ -359,7 +380,27 @@
                   </div>
                 </div>
 
+                <div v-if="composerQuote?.content" class="composer-quote mb-3">
+                  <div class="composer-quote__head">
+                    <span>{{ composerQuote.label || '引用内容' }}</span>
+                    <button type="button" class="composer-quote__remove" @click="clearComposerQuote">移除</button>
+                  </div>
+                  <div class="composer-quote__body">{{ summarizeQuote(composerQuote.content) }}</div>
+                </div>
+
+                <div v-if="composerImages.length" class="mb-3 flex flex-wrap gap-2">
+                  <div
+                    v-for="(img, idx) in composerImages"
+                    :key="`${img.url}-${idx}`"
+                    class="composer-image-chip"
+                  >
+                    <img :src="img.previewUrl || img.url" :alt="img.file_name || `图片${idx + 1}`" class="composer-image-chip__img" />
+                    <button type="button" class="composer-image-chip__remove" @click="removeComposerImage(idx)">×</button>
+                  </div>
+                </div>
+
                 <n-input
+                  ref="composerInputRef"
                   v-model:value="userInput"
                   type="textarea"
                   :autosize="{ minRows: 3, maxRows: 8 }"
@@ -372,9 +413,18 @@
 
                 <div class="mt-3 flex items-center justify-between gap-3">
                   <div class="text-xs opacity-70">
-                    Enter发送 · Shift+Enter换行 · 知识库不足时将按已选方式并发检索
+                    Enter发送 · Shift+Enter换行 · 支持上传图片与 {{ pasteShortcutLabel }} 粘贴图片
                   </div>
                   <n-space align="center">
+                    <input
+                      ref="composerImageInputRef"
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      class="hidden"
+                      @change="handleComposerFileInputChange"
+                    />
+                    <n-button quaternary :loading="uploadingComposerImages" @click="openComposerImagePicker">上传图片</n-button>
                     <n-button @click="clearInput" quaternary>清空</n-button>
                     <button
                       type="button"
@@ -387,7 +437,7 @@
                     <button
                       type="button"
                       class="send-icon-btn"
-                      :disabled="(!userInput.trim() && !sending) || sending"
+                      :disabled="((!userInput.trim() && !composerImages.length && !composerQuote) || sending || uploadingComposerImages)"
                       title="发送"
                       @click="sendMessage"
                     >
@@ -574,7 +624,7 @@
                     <div class="text-[11px] opacity-60 mb-2">
                       已加载完整 Markdown。任务完成后会自动以 AI 消息形式加入当前对话。
                     </div>
-                    <div class="rail-md-preview">
+                    <div class="rail-md-preview" @contextmenu.prevent="quoteMarkdownIntoComposer(currentNoteText, currentNoteLink?.file_name || 'Markdown 结果')">
                       <MarkdownContent :source="currentNoteText" />
                     </div>
                   </template>
@@ -598,7 +648,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NButton, NCard, NDropdown, NEmpty, NIcon, NInput, NSpace, NSpin, NTag, useMessage } from 'naive-ui'
-import { ArrowUpOutline, ChevronDownOutline, ChevronForwardOutline } from '@vicons/ionicons5'
+import { ArrowUpOutline, ChevronDownOutline, ChevronForwardOutline, Play } from '@vicons/ionicons5'
 import { useJobsStore } from '@/stores/modules/useJobsStore'
 import { useChatStore } from '@/stores/modules/useChatStore'
 import { useAuthStore } from '@/stores/modules/useAuthStore'
@@ -613,15 +663,22 @@ import {
   selectChatCandidateVideoApi,
   selectChatCandidateVideosBatchApi,
   sendChatMessageStreamApi,
+  uploadChatImageApi,
 } from '@/api/chat'
 import { buildJobNoteDownloadUrl, getJobNoteApi, getJobNoteLinkApi } from '@/api/jobs'
-import type { ChatMessage, ChatModelItem, JobCreateResponse, TopicQueueBatchSummary, TopicSelectedVideo } from '@/api/types'
+import type { ChatImageAttachment, ChatMessage, ChatModelItem, ChatQuoteReference, JobCreateResponse, TopicQueueBatchSummary, TopicSelectedVideo } from '@/api/types'
 import MarkdownContent from '@/components/MarkdownContent.vue'
+
+type UiComposerImage = ChatImageAttachment & {
+  previewUrl?: string
+}
 
 type UiChatMessage = {
   localId: string
   role: 'user' | 'assistant'
   content: string
+  images?: UiComposerImage[]
+  quote?: ChatQuoteReference | null
   pending?: boolean
   task?: JobCreateResponse | null
   taskSnapshot?: Record<string, any> | null
@@ -652,9 +709,15 @@ const globalStore = useGlobalStore()
 const CHAT_MODEL_STORAGE_KEY = 'robot_web_selected_chat_model'
 
 const userInput = ref('')
+const composerQuote = ref<ChatQuoteReference | null>(null)
+const composerImages = ref<UiComposerImage[]>([])
+const uploadingComposerImages = ref(false)
+const composerInputRef = ref<any>(null)
+const composerImageInputRef = ref<HTMLInputElement | null>(null)
 const imeComposing = ref(false)
 const messages = ref<UiChatMessage[]>([])
 const sending = ref(false)
+const isMacLikePlatform = ref(false)
 const knowledgeRetrievalEnabled = ref(false)
 const retrievalModeNetwork = ref(true)
 const retrievalModeBili = ref(false)
@@ -719,6 +782,7 @@ const selectedModelDisplayName = computed(() => {
 })
 
 const showTaskRail = computed(() => taskRailOpen.value)
+const pasteShortcutLabel = computed(() => (isMacLikePlatform.value ? '⌘V' : 'Ctrl+V'))
 
 const selectedSearchModes = computed(() => {
   const modes: string[] = []
@@ -774,6 +838,10 @@ const taskSnapshotByJob = computed(() => {
 onMounted(async () => {
   globalStore.setBreadcrumbBarVisible(false)
   syncUserSignatureFromAuth()
+  if (typeof window !== 'undefined') {
+    const uaPlatform = String((navigator as any)?.userAgentData?.platform || navigator.platform || navigator.userAgent || '').toLowerCase()
+    isMacLikePlatform.value = /mac|iphone|ipad|ipod/.test(uaPlatform)
+  }
 
   if (typeof window !== 'undefined') {
     const cached = localStorage.getItem(CHAT_MODEL_STORAGE_KEY)
@@ -788,7 +856,105 @@ onMounted(async () => {
 
 onUnmounted(() => {
   stopSearchTaskPolling()
+  for (const img of composerImages.value) {
+    revokeComposerImagePreview(img.previewUrl)
+  }
 })
+
+function revokeComposerImagePreview(url?: string) {
+  const target = String(url || '').trim()
+  if (!target || !target.startsWith('blob:') || typeof window === 'undefined') return
+  try {
+    window.URL.revokeObjectURL(target)
+  } catch {
+    // ignore
+  }
+}
+
+function summarizeQuote(text: string) {
+  const clean = String(text || '').replace(/\s+/g, ' ').trim()
+  if (clean.length <= 160) return clean
+  return `${clean.slice(0, 160)}...`
+}
+
+function openImageInNewTab(url: string) {
+  const target = String(url || '').trim()
+  if (!target || typeof window === 'undefined') return
+  window.open(target, '_blank', 'noopener,noreferrer')
+}
+
+function clearComposerQuote() {
+  composerQuote.value = null
+}
+
+function removeComposerImage(index: number) {
+  const next = [...composerImages.value]
+  const [removed] = next.splice(index, 1)
+  revokeComposerImagePreview(removed?.previewUrl)
+  composerImages.value = next
+}
+
+function openComposerImagePicker() {
+  composerImageInputRef.value?.click()
+}
+
+async function uploadComposerFiles(files: File[]) {
+  const imageFiles = files.filter((file) => String(file.type || '').startsWith('image/'))
+  if (!imageFiles.length) return
+  uploadingComposerImages.value = true
+  try {
+    const uploaded: UiComposerImage[] = []
+    for (const file of imageFiles) {
+      const res = await uploadChatImageApi(file)
+      uploaded.push({
+        ...(res.image || {}),
+        previewUrl: typeof window !== 'undefined' ? window.URL.createObjectURL(file) : '',
+      })
+    }
+    composerImages.value = [...composerImages.value, ...uploaded]
+    message.success(`已添加 ${uploaded.length} 张图片`)
+  } catch (e: any) {
+    message.error(e?.message || '上传图片失败')
+  } finally {
+    uploadingComposerImages.value = false
+  }
+}
+
+async function handleComposerFileInputChange(event: Event) {
+  const target = event.target as HTMLInputElement | null
+  const files = Array.from(target?.files || [])
+  if (target) target.value = ''
+  await uploadComposerFiles(files)
+}
+
+async function handleComposerPaste(event: ClipboardEvent) {
+  const items = Array.from(event.clipboardData?.items || [])
+  const files = items
+    .filter((item) => item.kind === 'file' && String(item.type || '').startsWith('image/'))
+    .map((item) => item.getAsFile())
+    .filter((file): file is File => file instanceof File)
+  if (!files.length) return
+  event.preventDefault()
+  await uploadComposerFiles(files)
+}
+
+function handleMessageContextQuote(msg: UiChatMessage) {
+  if (msg.role !== 'assistant' || !msg.renderAsMarkdown) return
+  quoteMarkdownIntoComposer(String(msg.content || ''), msg.markdownLabel || '知识整合文档')
+}
+
+function quoteMarkdownIntoComposer(content: string, label: string) {
+  const clean = String(content || '').trim()
+  if (!clean) return
+  composerQuote.value = {
+    label: String(label || '').trim() || '知识整合文档',
+    content: clean,
+  }
+  nextTick(() => {
+    composerInputRef.value?.focus?.()
+  })
+  message.success('已引用到输入区，可继续补充要求')
+}
 
 function sanitizeEvidenceTagText(v: string) {
   let s = String(v || '')
@@ -1178,6 +1344,8 @@ async function loadSessionFromRoute(sessionUuidFromRoute: string) {
       localId: `srv-${m.id || Math.random().toString(36).slice(2, 8)}`,
       role: (m.role === 'assistant' ? 'assistant' : 'user') as 'assistant' | 'user',
       content: (String(m.role || '') === 'assistant') ? sanitizeEvidenceTagText(String(m.content || '')) : String(m.content || ''),
+      images: Array.isArray(m.meta?.images) ? (m.meta?.images as UiComposerImage[]) : [],
+      quote: (m.meta?.quote as ChatQuoteReference | null) ?? null,
       pending: false,
       task: (m.meta?.task as JobCreateResponse | null) ?? null,
       taskSnapshot: ((m.meta as any)?.task_snapshot as Record<string, any> | null) ?? null,
@@ -1256,6 +1424,8 @@ function appendUiMessage(payload: Partial<UiChatMessage> & Pick<UiChatMessage, '
     localId: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     role: payload.role,
     content: payload.content,
+    images: Array.isArray(payload.images) ? payload.images : [],
+    quote: payload.quote ?? null,
     pending: payload.pending,
     task: payload.task ?? null,
     taskSnapshot: payload.taskSnapshot ?? null,
@@ -1292,6 +1462,8 @@ function mapAssistantMessage(msg: ChatMessage, task: JobCreateResponse | null, t
   return appendUiMessage({
     role: 'assistant',
     content: sanitizeEvidenceTagText(String(msg?.content || fallbackText)),
+    images: Array.isArray(msg?.meta?.images) ? (msg.meta.images as UiComposerImage[]) : [],
+    quote: (msg?.meta?.quote as ChatQuoteReference | null) ?? null,
     task: effectiveTask,
     taskSnapshot: ((msg?.meta as any)?.task_snapshot as Record<string, any> | null) ?? null,
     toolDecisionReason:
@@ -1320,18 +1492,26 @@ function mapAssistantMessage(msg: ChatMessage, task: JobCreateResponse | null, t
 
 async function sendMessage() {
   const text = userInput.value.trim()
-  if (!text) {
-    message.warning('请输入内容')
+  const quote = composerQuote.value ? { ...composerQuote.value } : null
+  const images = composerImages.value.map((img) => ({ ...img }))
+  if (!text && !images.length && !quote?.content) {
+    message.warning('请输入内容或上传图片')
     return
   }
   if (sending.value) return
+  if (uploadingComposerImages.value) {
+    message.warning('图片仍在上传中，请稍后发送')
+    return
+  }
   if (knowledgeRetrievalEnabled.value && !selectedSearchModes.value.length) {
     message.warning('请至少勾选一个检索方式（联网检索 / B站检索）')
     return
   }
 
-  appendUiMessage({ role: 'user', content: text })
+  appendUiMessage({ role: 'user', content: text, images, quote })
   userInput.value = ''
+  composerQuote.value = null
+  composerImages.value = []
   const pendingAssistant = appendUiMessage({
     role: 'assistant',
     content: '',
@@ -1341,6 +1521,7 @@ async function sendMessage() {
     preferMarkdown: false,
   })
   sending.value = true
+  let shouldRevokeSentImages = false
 
   try {
     const sessionUuid = await ensureChatSession()
@@ -1426,6 +1607,8 @@ async function sendMessage() {
       sessionUuid,
       {
         content: text,
+        images: images.map(({ previewUrl, ...img }) => img),
+        quote: quote?.content ? quote : null,
         model_name: selectedModel.value || '',
         auto_task: knowledgeRetrievalEnabled.value,
         search_modes: knowledgeRetrievalEnabled.value ? selectedSearchModes.value : [],
@@ -1626,11 +1809,14 @@ async function sendMessage() {
       last_message_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     })
+    shouldRevokeSentImages = true
     void authStore.fetchMe().then(() => {
       syncUserSignatureFromAuth()
     }).catch(() => undefined)
     void chatStore.refreshSessions().catch(() => undefined)
   } catch (e: any) {
+    if (!composerQuote.value && quote?.content) composerQuote.value = quote
+    if (!composerImages.value.length && images.length) composerImages.value = images
     pendingAssistant.pending = false
     pendingAssistant.streaming = false
     pendingAssistant.searchProgressVisible = false
@@ -1643,6 +1829,9 @@ async function sendMessage() {
     }
     message.error(e?.message || '发送失败')
   } finally {
+    if (shouldRevokeSentImages) {
+      for (const img of images) revokeComposerImagePreview(img.previewUrl)
+    }
     sending.value = false
   }
 }
@@ -1786,6 +1975,14 @@ function toggleVideoPreview(jobId: string, video: TopicSelectedVideo) {
     return
   }
   videoPreviewState.value = { ...videoPreviewState.value, [jobId]: key }
+}
+
+function handleCandidateCoverClick(jobId: string, video: TopicSelectedVideo) {
+  if (videoEmbedUrl(video)) {
+    toggleVideoPreview(jobId, video)
+    return
+  }
+  openVideoUrl(video)
 }
 
 function openVideoUrl(video: TopicSelectedVideo) {
@@ -2028,14 +2225,14 @@ async function selectCandidateVideo(parentJobId: string, video: TopicSelectedVid
     }
     if (task?.job_id) {
       chatStore.bindJobToSession(task.job_id, sessionUuid)
-      jobsStore.setCurrentJob(parentJobId)
+      jobsStore.setCurrentJob(task.job_id)
       knowledgeRetrievalEnabled.value = true
       try {
-        await jobsStore.fetchJob(parentJobId)
+        await jobsStore.fetchJob(task.job_id)
       } catch {
         // ignore
       }
-      jobsStore.connectJobEvents(parentJobId)
+      jobsStore.connectJobEvents(task.job_id)
     }
     await nextTick()
     const el = messagesContainerRef.value
@@ -2052,6 +2249,11 @@ async function selectCandidateVideo(parentJobId: string, video: TopicSelectedVid
 
 function clearInput() {
   userInput.value = ''
+  composerQuote.value = null
+  for (const img of composerImages.value) {
+    revokeComposerImagePreview(img.previewUrl)
+  }
+  composerImages.value = []
 }
 
 async function loadCurrentJobNoteAssets(options?: { silent?: boolean }) {
@@ -2267,10 +2469,93 @@ function humanizeSidebarLog(text: string) {
   box-shadow: 0 8px 30px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.7);
 }
 
+.composer-quote {
+  border: 1px solid rgba(191, 219, 254, 0.9);
+  background: rgba(239, 246, 255, 0.92);
+  border-radius: 16px;
+  padding: 10px 12px;
+}
+
+.composer-quote__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #1d4ed8;
+}
+
+.composer-quote__remove {
+  border: 0;
+  background: transparent;
+  color: rgba(29, 78, 216, 0.82);
+  cursor: pointer;
+}
+
+.composer-quote__body {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: rgba(30, 41, 59, 0.82);
+}
+
+.composer-image-chip {
+  position: relative;
+  width: 72px;
+  height: 72px;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid rgba(203, 213, 225, 0.82);
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.composer-image-chip__img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.composer-image-chip__remove {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  border: 0;
+  background: rgba(15, 23, 42, 0.76);
+  color: #fff;
+  cursor: pointer;
+}
+
 :global(.dark) .composer-shell {
   background: rgba(17, 24, 39, 0.55);
   border-color: rgba(148, 163, 184, 0.16);
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
+}
+
+:global(.dark) .composer-quote {
+  border-color: rgba(59, 130, 246, 0.35);
+  background: rgba(30, 41, 59, 0.86);
+}
+
+:global(.dark) .composer-quote__head {
+  color: rgba(147, 197, 253, 0.96);
+}
+
+:global(.dark) .composer-quote__remove {
+  color: rgba(191, 219, 254, 0.88);
+}
+
+:global(.dark) .composer-quote__body {
+  color: rgba(226, 232, 240, 0.82);
+}
+
+:global(.dark) .composer-image-chip {
+  border-color: rgba(75, 85, 99, 0.78);
+  background: rgba(17, 24, 39, 0.8);
 }
 
 .knowledge-toggle {
@@ -2705,6 +2990,48 @@ function humanizeSidebarLog(text: string) {
   border: 1px solid transparent;
 }
 
+.message-bubble--quotable {
+  cursor: context-menu;
+}
+
+.message-quote-chip {
+  border-radius: 14px;
+  border: 1px solid rgba(191, 219, 254, 0.95);
+  background: rgba(239, 246, 255, 0.88);
+  padding: 10px 12px;
+}
+
+.message-quote-chip__label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #1d4ed8;
+}
+
+.message-quote-chip__body {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: rgba(30, 41, 59, 0.82);
+}
+
+.message-image-thumb {
+  width: 112px;
+  height: 112px;
+  overflow: hidden;
+  border-radius: 14px;
+  border: 1px solid rgba(203, 213, 225, 0.82);
+  background: rgba(241, 245, 249, 0.92);
+  padding: 0;
+  cursor: zoom-in;
+}
+
+.message-image-thumb__img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
 .message-bubble--markdown {
   white-space: normal;
   overflow: hidden;
@@ -2712,6 +3039,24 @@ function humanizeSidebarLog(text: string) {
 
 .message-bubble--markdown :deep(.md-content) {
   font-size: 0.92rem;
+}
+
+:global(.dark) .message-quote-chip {
+  border-color: rgba(59, 130, 246, 0.34);
+  background: rgba(30, 41, 59, 0.8);
+}
+
+:global(.dark) .message-quote-chip__label {
+  color: rgba(147, 197, 253, 0.95);
+}
+
+:global(.dark) .message-quote-chip__body {
+  color: rgba(226, 232, 240, 0.82);
+}
+
+:global(.dark) .message-image-thumb {
+  border-color: rgba(75, 85, 99, 0.8);
+  background: rgba(17, 24, 39, 0.82);
 }
 
 .rail-md-preview :deep(.md-content) {
@@ -2875,6 +3220,45 @@ function humanizeSidebarLog(text: string) {
   color: rgba(71, 85, 105, 0.96);
 }
 
+.ai-candidate-cover {
+  position: relative;
+  display: block;
+  width: 100%;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.ai-candidate-cover__overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.08), rgba(15, 23, 42, 0.4));
+  opacity: 0;
+  transition: opacity 0.18s ease;
+  pointer-events: none;
+}
+
+.ai-candidate-cover:hover .ai-candidate-cover__overlay,
+.ai-candidate-cover:focus-visible .ai-candidate-cover__overlay {
+  opacity: 1;
+}
+
+.ai-candidate-cover__play {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.78);
+  color: #f8fafc;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.25);
+}
+
 .ai-candidate-card__reason {
   color: rgba(51, 65, 85, 0.84);
 }
@@ -2952,6 +3336,15 @@ function humanizeSidebarLog(text: string) {
   border: 1px solid rgba(75, 85, 99, 0.72);
   background: linear-gradient(180deg, rgba(17, 24, 39, 0.5) 0%, rgba(30, 41, 59, 0.5) 100%);
   box-shadow: 0 10px 20px rgba(0, 0, 0, 0.22);
+}
+
+:global(.dark) .ai-candidate-cover__overlay {
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.12), rgba(15, 23, 42, 0.56));
+}
+
+:global(.dark) .ai-candidate-cover__play {
+  background: rgba(15, 23, 42, 0.84);
+  color: rgba(241, 245, 249, 0.98);
 }
 
 :global(.dark) .ai-candidate-card:hover {

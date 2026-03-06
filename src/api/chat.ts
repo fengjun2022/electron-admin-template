@@ -8,6 +8,7 @@ import type {
   ChatModelsResponse,
   ChatJobNoteMessageRequest,
   ChatJobNoteMessageResponse,
+  ChatImageUploadResponse,
   ChatReplyRequest,
   ChatReplyResponse,
   ChatSessionsResponse,
@@ -92,6 +93,31 @@ export function saveChatJobNoteMessageApi(
     body: payload,
     auth: true,
   })
+}
+
+export async function uploadChatImageApi(file: File) {
+  const url = buildApiUrl('/chat/uploads/image')
+  const form = new FormData()
+  form.append('file', file)
+  const headers: Record<string, string> = {}
+  const token = getAuthToken()
+  if (token) headers['Authorization'] = `Bearer ${token}`
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers,
+    body: form,
+  })
+  if (!resp.ok) {
+    let err = `HTTP ${resp.status}`
+    try {
+      const data = await resp.json() as any
+      err = data?.detail || data?.message || err
+    } catch {
+      // ignore
+    }
+    throw new Error(err)
+  }
+  return await resp.json() as ChatImageUploadResponse
 }
 
 type StreamHandlers = {
