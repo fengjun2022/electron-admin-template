@@ -77,7 +77,7 @@
                         msg.pending ? 'message-pending' : '',
                         msg.pending ? 'opacity-70' : '',
                       ]"
-                      @contextmenu.prevent="handleMessageContextQuote(msg)"
+                      @contextmenu.prevent="handleMessageContextMenu($event, msg)"
                     >
                       <div v-if="msg.pending" class="thinking-indicator text-sm">
                         <span class="thinking-indicator__label">浏览中</span>
@@ -385,7 +385,6 @@
                     <span>{{ composerQuote.label || '引用内容' }}</span>
                     <button type="button" class="composer-quote__remove" @click="clearComposerQuote">移除</button>
                   </div>
-                  <div class="composer-quote__body">{{ summarizeQuote(composerQuote.content) }}</div>
                 </div>
 
                 <div v-if="composerImages.length" class="mb-3 flex flex-wrap gap-2">
@@ -624,7 +623,7 @@
                     <div class="text-[11px] opacity-60 mb-2">
                       已加载完整 Markdown。任务完成后会自动以 AI 消息形式加入当前对话。
                     </div>
-                    <div class="rail-md-preview" @contextmenu.prevent="quoteMarkdownIntoComposer(currentNoteText, currentNoteLink?.file_name || 'Markdown 结果')">
+                    <div class="rail-md-preview" @contextmenu.prevent="handleRailMarkdownContextMenu($event)">
                       <MarkdownContent :source="currentNoteText" />
                     </div>
                   </template>
@@ -640,6 +639,20 @@
           </transition>
         </div>
       </div>
+    </div>
+    <div
+      v-if="quoteContextMenu.visible"
+      ref="quoteContextMenuRef"
+      class="quote-context-menu"
+      :style="{
+        left: `${quoteContextMenu.x}px`,
+        top: `${quoteContextMenu.y}px`,
+      }"
+      @click.stop
+    >
+      <button type="button" class="quote-context-menu__item" @click="applyContextQuote">
+        引用到输入框
+      </button>
     </div>
   </div>
 </template>
@@ -714,6 +727,7 @@ const composerImages = ref<UiComposerImage[]>([])
 const uploadingComposerImages = ref(false)
 const composerInputRef = ref<any>(null)
 const composerImageInputRef = ref<HTMLInputElement | null>(null)
+const quoteContextMenuRef = ref<HTMLElement | null>(null)
 const imeComposing = ref(false)
 const messages = ref<UiChatMessage[]>([])
 const sending = ref(false)
@@ -736,6 +750,13 @@ const candidateSelectionState = ref<Record<string, Record<string, boolean>>>({})
 const batchSelectingJobs = ref<Record<string, boolean>>({})
 const candidatePageState = ref<Record<string, number>>({})
 const taskRailOpen = ref(false)
+const quoteContextMenu = ref({
+  visible: false,
+  x: 0,
+  y: 0,
+  content: '',
+  label: '',
+})
 
 const currentJobState = computed(() => (jobsStore.currentJobId ? jobsStore.jobs[jobsStore.currentJobId] : null))
 const currentSnapshot = computed(() => currentJobState.value?.snapshot || null)
@@ -852,10 +873,21 @@ onMounted(async () => {
   handleNewChatRouteSignal(String(route.query.newChat || ''))
   void loadSessionFromRoute(String(route.query.session || ''))
   startSearchTaskPolling()
+  if (typeof window !== 'undefined') {
+    window.addEventListener('pointerdown', handleGlobalPointerDown)
+    window.addEventListener('scroll', closeQuoteContextMenu, true)
+    window.addEventListener('keydown', handleGlobalKeydown)
+  }
 })
 
 onUnmounted(() => {
   stopSearchTaskPolling()
+  closeQuoteContextMenu()
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('pointerdown', handleGlobalPointerDown)
+    window.removeEventListener('scroll', closeQuoteContextMenu, true)
+    window.removeEventListener('keydown', handleGlobalKeydown)
+  }
   for (const img of composerImages.value) {
     revokeComposerImagePreview(img.previewUrl)
   }
@@ -875,6 +907,40 @@ function summarizeQuote(text: string) {
   const clean = String(text || '').replace(/\s+/g, ' ').trim()
   if (clean.length <= 160) return clean
   return `${clean.slice(0, 160)}...`
+}
+
+function closeQuoteContextMenu() {
+  quoteContextMenu.value.visible = false
+}
+
+function openQuoteContextMenu(event: MouseEvent, content: string, label: string) {
+  const clean = String(content || '').trim()
+  if (!clean) return
+  const menuWidth = 168
+  const menuHeight = 48
+  const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 0
+  const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 0
+  const maxX = viewportWidth > 0 ? Math.max(12, viewportWidth - menuWidth - 12) : event.clientX
+  const maxY = viewportHeight > 0 ? Math.max(12, viewportHeight - menuHeight - 12) : event.clientY
+  quoteContextMenu.value = {
+    visible: true,
+    x: Math.min(Math.max(12, event.clientX), maxX),
+    y: Math.min(Math.max(12, event.clientY), maxY),
+    content: clean,
+    label: String(label || '').trim() || '知识整合文档',
+  }
+}
+
+function handleGlobalPointerDown(event: PointerEvent) {
+  if (!quoteContextMenu.value.visible) return
+  const target = event.target as Node | null
+  if (target && quoteContextMenuRef.value?.contains(target)) return
+  closeQuoteContextMenu()
+}
+
+function handleGlobalKeydown(event: KeyboardEvent) {
+  if (event.key !== 'Escape') return
+  closeQuoteContextMenu()
 }
 
 function openImageInNewTab(url: string) {
@@ -938,9 +1004,9 @@ async function handleComposerPaste(event: ClipboardEvent) {
   await uploadComposerFiles(files)
 }
 
-function handleMessageContextQuote(msg: UiChatMessage) {
+function handleMessageContextMenu(event: MouseEvent, msg: UiChatMessage) {
   if (msg.role !== 'assistant' || !msg.renderAsMarkdown) return
-  quoteMarkdownIntoComposer(String(msg.content || ''), msg.markdownLabel || '知识整合文档')
+  openQuoteContextMenu(event, String(msg.content || ''), msg.markdownLabel || '知识整合文档')
 }
 
 function quoteMarkdownIntoComposer(content: string, label: string) {
@@ -954,6 +1020,16 @@ function quoteMarkdownIntoComposer(content: string, label: string) {
     composerInputRef.value?.focus?.()
   })
   message.success('已引用到输入区，可继续补充要求')
+}
+
+function handleRailMarkdownContextMenu(event: MouseEvent) {
+  openQuoteContextMenu(event, currentNoteText.value, currentNoteLink.value?.file_name || 'Markdown 结果')
+}
+
+function applyContextQuote() {
+  const payload = quoteContextMenu.value
+  closeQuoteContextMenu()
+  quoteMarkdownIntoComposer(payload.content, payload.label)
 }
 
 function sanitizeEvidenceTagText(v: string) {
@@ -2478,7 +2554,7 @@ function humanizeSidebarLog(text: string) {
   border: 1px solid rgba(191, 219, 254, 0.9);
   background: rgba(239, 246, 255, 0.92);
   border-radius: 16px;
-  padding: 10px 12px;
+  padding: 9px 12px;
 }
 
 .composer-quote__head {
@@ -2498,11 +2574,33 @@ function humanizeSidebarLog(text: string) {
   cursor: pointer;
 }
 
-.composer-quote__body {
-  margin-top: 6px;
-  font-size: 12px;
-  line-height: 1.55;
-  color: rgba(30, 41, 59, 0.82);
+.quote-context-menu {
+  position: fixed;
+  z-index: 1200;
+  min-width: 168px;
+  border-radius: 14px;
+  border: 1px solid rgba(203, 213, 225, 0.92);
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.18);
+  padding: 6px;
+}
+
+.quote-context-menu__item {
+  width: 100%;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  text-align: left;
+  padding: 9px 10px;
+  font-size: 13px;
+  color: #0f172a;
+  cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease;
+}
+
+.quote-context-menu__item:hover {
+  background: rgba(239, 246, 255, 0.96);
+  color: #1d4ed8;
 }
 
 .composer-image-chip {
@@ -2554,8 +2652,19 @@ function humanizeSidebarLog(text: string) {
   color: rgba(191, 219, 254, 0.88);
 }
 
-:global(.dark) .composer-quote__body {
-  color: rgba(226, 232, 240, 0.82);
+:global(.dark) .quote-context-menu {
+  border-color: rgba(71, 85, 105, 0.68);
+  background: rgba(15, 23, 42, 0.96);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.38);
+}
+
+:global(.dark) .quote-context-menu__item {
+  color: rgba(241, 245, 249, 0.94);
+}
+
+:global(.dark) .quote-context-menu__item:hover {
+  background: rgba(30, 41, 59, 0.92);
+  color: #93c5fd;
 }
 
 :global(.dark) .composer-image-chip {
