@@ -402,6 +402,12 @@ export interface ChatImageUploadResponse {
   image: ChatImageAttachment
 }
 
+export interface ChatImageDeleteResponse {
+  ok: boolean
+  bucket: string
+  object_name: string
+}
+
 export interface ChatReplyResponse {
   ok: boolean
   session_uuid: string

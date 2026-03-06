@@ -8,6 +8,7 @@ import type {
   ChatModelsResponse,
   ChatJobNoteMessageRequest,
   ChatJobNoteMessageResponse,
+  ChatImageDeleteResponse,
   ChatImageUploadResponse,
   ChatReplyRequest,
   ChatReplyResponse,
@@ -95,29 +96,63 @@ export function saveChatJobNoteMessageApi(
   })
 }
 
-export async function uploadChatImageApi(file: File) {
+export async function uploadChatImageApi(
+  file: File,
+  options: { onProgress?: (percent: number) => void } = {},
+) {
   const url = buildApiUrl('/chat/uploads/image')
   const form = new FormData()
   form.append('file', file)
   const headers: Record<string, string> = {}
   const token = getAuthToken()
   if (token) headers['Authorization'] = `Bearer ${token}`
-  const resp = await fetch(url, {
-    method: 'POST',
-    headers,
-    body: form,
-  })
-  if (!resp.ok) {
-    let err = `HTTP ${resp.status}`
-    try {
-      const data = await resp.json() as any
-      err = data?.detail || data?.message || err
-    } catch {
-      // ignore
+  return await new Promise<ChatImageUploadResponse>((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', url, true)
+    Object.entries(headers).forEach(([key, value]) => {
+      xhr.setRequestHeader(key, value)
+    })
+    xhr.upload.onprogress = (event) => {
+      if (!event.lengthComputable) return
+      const percent = Math.max(0, Math.min(100, Math.round((event.loaded / event.total) * 100)))
+      options.onProgress?.(percent)
     }
-    throw new Error(err)
-  }
-  return await resp.json() as ChatImageUploadResponse
+    xhr.onerror = () => {
+      reject(new Error('上传图片失败，网络异常'))
+    }
+    xhr.onload = () => {
+      const status = Number(xhr.status || 0)
+      const text = String(xhr.responseText || '')
+      if (status < 200 || status >= 300) {
+        let err = `HTTP ${status}`
+        try {
+          const data = JSON.parse(text) as any
+          err = data?.detail || data?.message || err
+        } catch {
+          if (text.trim()) err = text.trim()
+        }
+        reject(new Error(err))
+        return
+      }
+      try {
+        resolve(JSON.parse(text) as ChatImageUploadResponse)
+      } catch {
+        reject(new Error('上传图片失败，响应解析异常'))
+      }
+    }
+    xhr.send(form)
+  })
+}
+
+export function deleteChatImageApi(bucket: string, objectName: string) {
+  const q = new URLSearchParams({
+    bucket: String(bucket || ''),
+    object_name: String(objectName || ''),
+  })
+  return apiRequest<ChatImageDeleteResponse>(`/chat/uploads/image?${q.toString()}`, {
+    method: 'DELETE',
+    auth: true,
+  })
 }
 
 type StreamHandlers = {

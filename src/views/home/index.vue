@@ -102,7 +102,7 @@
                           :key="`${msg.localId}-img-${img.url}-${imgIdx}`"
                           type="button"
                           class="message-image-thumb"
-                          @click="openImageInNewTab(img.url)"
+                          @click="openImagePreview(img.url, img.file_name || `图片${imgIdx + 1}`)"
                         >
                           <img :src="img.url" :alt="img.file_name || `图片${imgIdx + 1}`" class="message-image-thumb__img" loading="lazy" />
                         </button>
@@ -390,11 +390,39 @@
                 <div v-if="composerImages.length" class="mb-3 flex flex-wrap gap-2">
                   <div
                     v-for="(img, idx) in composerImages"
-                    :key="`${img.url}-${idx}`"
+                    :key="img.localId || `${img.url}-${idx}`"
                     class="composer-image-chip"
                   >
-                    <img :src="img.previewUrl || img.url" :alt="img.file_name || `图片${idx + 1}`" class="composer-image-chip__img" />
-                    <button type="button" class="composer-image-chip__remove" @click="removeComposerImage(idx)">×</button>
+                    <button
+                      type="button"
+                      class="composer-image-chip__button"
+                      @click="openImagePreview(img.previewUrl || img.url, img.file_name || `图片${idx + 1}`)"
+                    >
+                      <img :src="img.previewUrl || img.url" :alt="img.file_name || `图片${idx + 1}`" class="composer-image-chip__img" />
+                    </button>
+                    <div
+                      v-if="img.uploadStatus === 'uploading' || img.uploadStatus === 'failed'"
+                      class="composer-image-chip__overlay"
+                      :class="{ 'composer-image-chip__overlay--error': img.uploadStatus === 'failed' }"
+                    >
+                      <div
+                        v-if="img.uploadStatus === 'uploading'"
+                        class="composer-image-chip__progress"
+                        :style="{ '--progress': `${Math.max(0, Math.min(100, Number(img.uploadProgress || 0)))}%` }"
+                      >
+                        <span>{{ Math.max(0, Math.min(100, Number(img.uploadProgress || 0))) }}%</span>
+                      </div>
+                      <button
+                        v-else
+                        type="button"
+                        class="composer-image-chip__retry"
+                        :title="img.errorMessage || '重新上传'"
+                        @click.stop="retryComposerImage(img.localId || '')"
+                      >
+                        <n-icon :component="RefreshOutline" size="18" />
+                      </button>
+                    </div>
+                    <button type="button" class="composer-image-chip__remove" @click.stop="removeComposerImage(idx)">×</button>
                   </div>
                 </div>
 
@@ -436,7 +464,7 @@
                     <button
                       type="button"
                       class="send-icon-btn"
-                      :disabled="((!userInput.trim() && !composerImages.length && !composerQuote) || sending || uploadingComposerImages)"
+                      :disabled="((!userInput.trim() && !composerImages.length && !composerQuote) || sending || uploadingComposerImages || hasFailedComposerImages)"
                       title="发送"
                       @click="sendMessage"
                     >
@@ -654,6 +682,23 @@
         引用到输入框
       </button>
     </div>
+    <div
+      v-if="imagePreview.visible"
+      class="image-preview-layer"
+      @click="closeImagePreview"
+    >
+      <button type="button" class="image-preview-layer__close" @click.stop="closeImagePreview">×</button>
+      <div class="image-preview-layer__body" @click.stop>
+        <img
+          :src="imagePreview.url"
+          :alt="imagePreview.label || '图片预览'"
+          class="image-preview-layer__img"
+        />
+        <div v-if="imagePreview.label" class="image-preview-layer__caption">
+          {{ imagePreview.label }}
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -661,7 +706,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NButton, NCard, NDropdown, NEmpty, NIcon, NInput, NSpace, NSpin, NTag, useMessage } from 'naive-ui'
-import { ArrowUpOutline, ChevronDownOutline, ChevronForwardOutline, Play } from '@vicons/ionicons5'
+import { ArrowUpOutline, ChevronDownOutline, ChevronForwardOutline, Play, RefreshOutline } from '@vicons/ionicons5'
 import { useJobsStore } from '@/stores/modules/useJobsStore'
 import { useChatStore } from '@/stores/modules/useChatStore'
 import { useAuthStore } from '@/stores/modules/useAuthStore'
@@ -675,6 +720,7 @@ import {
   saveChatJobNoteMessageApi,
   selectChatCandidateVideoApi,
   selectChatCandidateVideosBatchApi,
+  deleteChatImageApi,
   sendChatMessageStreamApi,
   uploadChatImageApi,
 } from '@/api/chat'
@@ -683,7 +729,12 @@ import type { ChatImageAttachment, ChatMessage, ChatModelItem, ChatQuoteReferenc
 import MarkdownContent from '@/components/MarkdownContent.vue'
 
 type UiComposerImage = ChatImageAttachment & {
+  localId?: string
   previewUrl?: string
+  uploadStatus?: 'uploading' | 'uploaded' | 'failed'
+  uploadProgress?: number
+  errorMessage?: string
+  sourceFile?: File | null
 }
 
 type UiChatMessage = {
@@ -724,7 +775,6 @@ const CHAT_MODEL_STORAGE_KEY = 'robot_web_selected_chat_model'
 const userInput = ref('')
 const composerQuote = ref<ChatQuoteReference | null>(null)
 const composerImages = ref<UiComposerImage[]>([])
-const uploadingComposerImages = ref(false)
 const composerInputRef = ref<any>(null)
 const composerImageInputRef = ref<HTMLInputElement | null>(null)
 const quoteContextMenuRef = ref<HTMLElement | null>(null)
@@ -757,9 +807,20 @@ const quoteContextMenu = ref({
   content: '',
   label: '',
 })
+const imagePreview = ref({
+  visible: false,
+  url: '',
+  label: '',
+})
 
 const currentJobState = computed(() => (jobsStore.currentJobId ? jobsStore.jobs[jobsStore.currentJobId] : null))
 const currentSnapshot = computed(() => currentJobState.value?.snapshot || null)
+const uploadingComposerImages = computed(() =>
+  composerImages.value.some((img) => img.uploadStatus === 'uploading'),
+)
+const hasFailedComposerImages = computed(() =>
+  composerImages.value.some((img) => img.uploadStatus === 'failed'),
+)
 const currentUserLabel = computed(() => authStore.user?.display_name || authStore.user?.username || '你')
 const loadingCurrentJobNote = ref(false)
 const syncingJobNoteMessageByJobId = ref<Record<string, boolean>>({})
@@ -903,6 +964,10 @@ function revokeComposerImagePreview(url?: string) {
   }
 }
 
+function makeComposerImageLocalId() {
+  return `img-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+}
+
 function summarizeQuote(text: string) {
   const clean = String(text || '').replace(/\s+/g, ' ').trim()
   if (clean.length <= 160) return clean
@@ -941,19 +1006,45 @@ function handleGlobalPointerDown(event: PointerEvent) {
 function handleGlobalKeydown(event: KeyboardEvent) {
   if (event.key !== 'Escape') return
   closeQuoteContextMenu()
+  closeImagePreview()
 }
 
-function openImageInNewTab(url: string) {
+function openImagePreview(url: string, label = '') {
   const target = String(url || '').trim()
-  if (!target || typeof window === 'undefined') return
-  window.open(target, '_blank', 'noopener,noreferrer')
+  if (!target) return
+  imagePreview.value = {
+    visible: true,
+    url: target,
+    label: String(label || '').trim(),
+  }
+}
+
+function closeImagePreview() {
+  imagePreview.value.visible = false
 }
 
 function clearComposerQuote() {
   composerQuote.value = null
 }
 
-function removeComposerImage(index: number) {
+function patchComposerImage(localId: string, patch: Partial<UiComposerImage>) {
+  composerImages.value = composerImages.value.map((img) => (
+    img.localId === localId ? { ...img, ...patch } : img
+  ))
+}
+
+async function removeComposerImage(index: number) {
+  const current = composerImages.value[index]
+  if (!current) return
+  const isUploaded = current.uploadStatus === 'uploaded' && String(current.object_name || '').trim()
+  if (isUploaded) {
+    try {
+      await deleteChatImageApi(String(current.bucket || ''), String(current.object_name || ''))
+    } catch (e: any) {
+      message.error(e?.message || '删除图片失败')
+      return
+    }
+  }
   const next = [...composerImages.value]
   const [removed] = next.splice(index, 1)
   revokeComposerImagePreview(removed?.previewUrl)
@@ -967,22 +1058,53 @@ function openComposerImagePicker() {
 async function uploadComposerFiles(files: File[]) {
   const imageFiles = files.filter((file) => String(file.type || '').startsWith('image/'))
   if (!imageFiles.length) return
-  uploadingComposerImages.value = true
+  const pendingItems: UiComposerImage[] = imageFiles.map((file) => ({
+    localId: makeComposerImageLocalId(),
+    url: '',
+    file_name: file.name,
+    mime_type: file.type,
+    size: file.size,
+    bucket: '',
+    object_name: '',
+    previewUrl: typeof window !== 'undefined' ? window.URL.createObjectURL(file) : '',
+    uploadStatus: 'uploading',
+    uploadProgress: 0,
+    errorMessage: '',
+    sourceFile: file,
+  }))
+  composerImages.value = [...composerImages.value, ...pendingItems]
+  await Promise.allSettled(pendingItems.map((img) => retryComposerImage(img.localId || '')))
+}
+
+async function retryComposerImage(localId: string) {
+  const target = composerImages.value.find((img) => img.localId === localId)
+  const file = target?.sourceFile
+  if (!target || !(file instanceof File)) return
+  patchComposerImage(localId, {
+    uploadStatus: 'uploading',
+    uploadProgress: 0,
+    errorMessage: '',
+  })
   try {
-    const uploaded: UiComposerImage[] = []
-    for (const file of imageFiles) {
-      const res = await uploadChatImageApi(file)
-      uploaded.push({
-        ...(res.image || {}),
-        previewUrl: typeof window !== 'undefined' ? window.URL.createObjectURL(file) : '',
-      })
-    }
-    composerImages.value = [...composerImages.value, ...uploaded]
-    message.success(`已添加 ${uploaded.length} 张图片`)
+    const res = await uploadChatImageApi(file, {
+      onProgress: (percent) => {
+        patchComposerImage(localId, { uploadProgress: percent })
+      },
+    })
+    patchComposerImage(localId, {
+      ...(res.image || {}),
+      uploadStatus: 'uploaded',
+      uploadProgress: 100,
+      errorMessage: '',
+      sourceFile: null,
+    })
   } catch (e: any) {
-    message.error(e?.message || '上传图片失败')
-  } finally {
-    uploadingComposerImages.value = false
+    const errText = String(e?.message || '上传图片失败')
+    patchComposerImage(localId, {
+      uploadStatus: 'failed',
+      errorMessage: errText,
+    })
+    message.error(errText)
   }
 }
 
@@ -1574,7 +1696,9 @@ function mapAssistantMessage(msg: ChatMessage, task: JobCreateResponse | null, t
 async function sendMessage() {
   const text = userInput.value.trim()
   const quote = composerQuote.value ? { ...composerQuote.value } : null
-  const images = composerImages.value.map((img) => ({ ...img }))
+  const images = composerImages.value
+    .filter((img) => img.uploadStatus !== 'failed' && img.uploadStatus !== 'uploading' && String(img.url || '').trim())
+    .map((img) => ({ ...img }))
   if (!text && !images.length && !quote?.content) {
     message.warning('请输入内容或上传图片')
     return
@@ -1582,6 +1706,10 @@ async function sendMessage() {
   if (sending.value) return
   if (uploadingComposerImages.value) {
     message.warning('图片仍在上传中，请稍后发送')
+    return
+  }
+  if (hasFailedComposerImages.value) {
+    message.warning('有图片上传失败，请重试或移除后再发送')
     return
   }
   if (knowledgeRetrievalEnabled.value && !selectedSearchModes.value.length) {
@@ -1688,7 +1816,7 @@ async function sendMessage() {
       sessionUuid,
       {
         content: text,
-        images: images.map(({ previewUrl, ...img }) => img),
+        images: images.map(({ previewUrl, uploadStatus, uploadProgress, errorMessage, sourceFile, localId, ...img }) => img),
         quote: quote?.content ? quote : null,
         model_name: selectedModel.value || '',
         auto_task: knowledgeRetrievalEnabled.value,
@@ -2603,6 +2731,58 @@ function humanizeSidebarLog(text: string) {
   color: #1d4ed8;
 }
 
+.image-preview-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 1300;
+  background: rgba(15, 23, 42, 0.82);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 28px;
+}
+
+.image-preview-layer__body {
+  max-width: min(92vw, 1200px);
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.image-preview-layer__img {
+  display: block;
+  max-width: 100%;
+  max-height: calc(92vh - 64px);
+  border-radius: 18px;
+  object-fit: contain;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.35);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.image-preview-layer__caption {
+  max-width: min(92vw, 900px);
+  text-align: center;
+  font-size: 12px;
+  color: rgba(241, 245, 249, 0.88);
+  word-break: break-word;
+}
+
+.image-preview-layer__close {
+  position: absolute;
+  top: 16px;
+  right: 18px;
+  border: 0;
+  background: transparent;
+  color: #fff;
+  font-size: 34px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
+}
+
 .composer-image-chip {
   position: relative;
   width: 72px;
@@ -2613,6 +2793,15 @@ function humanizeSidebarLog(text: string) {
   background: rgba(255, 255, 255, 0.92);
 }
 
+.composer-image-chip__button {
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: zoom-in;
+}
+
 .composer-image-chip__img {
   width: 100%;
   height: 100%;
@@ -2620,17 +2809,69 @@ function humanizeSidebarLog(text: string) {
   display: block;
 }
 
+.composer-image-chip__overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 42, 0.38);
+  backdrop-filter: blur(1.5px);
+}
+
+.composer-image-chip__overlay--error {
+  background: rgba(15, 23, 42, 0.48);
+}
+
+.composer-image-chip__progress {
+  --progress: 0%;
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(circle at center, rgba(15, 23, 42, 0.86) 58%, transparent 60%),
+    conic-gradient(#ffffff var(--progress), rgba(255, 255, 255, 0.24) 0);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.composer-image-chip__retry {
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(15, 23, 42, 0.78);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.18s ease, background 0.18s ease;
+}
+
+.composer-image-chip__retry:hover {
+  transform: translateY(-1px) rotate(-18deg);
+  background: rgba(37, 99, 235, 0.92);
+}
+
 .composer-image-chip__remove {
   position: absolute;
-  top: 6px;
+  top: 4px;
   right: 6px;
-  width: 20px;
-  height: 20px;
-  border-radius: 999px;
   border: 0;
-  background: rgba(15, 23, 42, 0.76);
+  background: transparent;
   color: #fff;
   cursor: pointer;
+  padding: 0;
+  font-size: 22px;
+  line-height: 1;
+  z-index: 3;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.45);
 }
 
 :global(.dark) .composer-shell {
@@ -2667,9 +2908,17 @@ function humanizeSidebarLog(text: string) {
   color: #93c5fd;
 }
 
+:global(.dark) .image-preview-layer__close {
+  color: rgba(248, 250, 252, 0.96);
+}
+
 :global(.dark) .composer-image-chip {
   border-color: rgba(75, 85, 99, 0.78);
   background: rgba(17, 24, 39, 0.8);
+}
+
+:global(.dark) .composer-image-chip__overlay {
+  background: rgba(2, 6, 23, 0.48);
 }
 
 .knowledge-toggle {
