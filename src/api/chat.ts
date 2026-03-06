@@ -12,6 +12,8 @@ import type {
   ChatImageUploadResponse,
   ChatReplyRequest,
   ChatReplyResponse,
+  ChatReplyStopRequest,
+  ChatReplyStopResponse,
   ChatSessionsResponse,
   ChatSessionCreateResponse,
 } from './types'
@@ -151,6 +153,14 @@ export function deleteChatImageApi(bucket: string, objectName: string) {
   })
   return apiRequest<ChatImageDeleteResponse>(`/chat/uploads/image?${q.toString()}`, {
     method: 'DELETE',
+    auth: true,
+  })
+}
+
+export function stopChatMessageStreamApi(sessionUuid: string, payload: ChatReplyStopRequest) {
+  return apiRequest<ChatReplyStopResponse>(`/chat/sessions/${sessionUuid}/reply-stop`, {
+    method: 'POST',
+    body: payload,
     auth: true,
   })
 }

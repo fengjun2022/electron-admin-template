@@ -35,7 +35,11 @@
               </div>
             </div>
 
-            <div ref="messagesContainerRef" class="flex-1 min-h-0 overflow-auto px-1 py-1">
+            <div
+              ref="messagesContainerRef"
+              class="flex-1 min-h-0 overflow-auto px-1 py-1"
+              @scroll.passive="handleMessagesScroll"
+            >
               <div class="space-y-4">
                 <div v-if="loadingSessionMessages" class="h-full min-h-[220px] flex items-center justify-center">
                   <div class="flex flex-col items-center gap-3 text-sm opacity-75">
@@ -470,12 +474,12 @@
                     <button
                       type="button"
                       class="send-icon-btn"
-                      :disabled="((!userInput.trim() && !composerImages.length && !composerQuote) || sending || uploadingComposerImages || hasFailedComposerImages)"
-                      title="发送"
-                      @click="sendMessage"
+                      :class="{ 'send-icon-btn--stopping': sending }"
+                      :disabled="sending ? stoppingReply : ((!userInput.trim() && !composerImages.length && !composerQuote) || uploadingComposerImages || hasFailedComposerImages)"
+                      :title="sending ? '停止回复' : '发送'"
+                      @click="sending ? stopCurrentReply() : sendMessage()"
                     >
-                      <span v-if="sending" class="send-icon-spinner" />
-                      <n-icon v-else :component="ArrowUpOutline" size="18" />
+                      <n-icon :component="sending ? StopOutline : ArrowUpOutline" size="18" />
                     </button>
                   </n-space>
                 </div>
@@ -712,7 +716,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NButton, NCard, NDropdown, NEmpty, NIcon, NInput, NSpace, NSpin, NTag, useMessage } from 'naive-ui'
-import { ArrowUpOutline, ChevronDownOutline, ChevronForwardOutline, Play, RefreshOutline } from '@vicons/ionicons5'
+import { ArrowUpOutline, ChevronDownOutline, ChevronForwardOutline, Play, RefreshOutline, StopOutline } from '@vicons/ionicons5'
 import { useJobsStore } from '@/stores/modules/useJobsStore'
 import { useChatStore } from '@/stores/modules/useChatStore'
 import { useAuthStore } from '@/stores/modules/useAuthStore'
@@ -728,6 +732,7 @@ import {
   selectChatCandidateVideosBatchApi,
   deleteChatImageApi,
   sendChatMessageStreamApi,
+  stopChatMessageStreamApi,
   uploadChatImageApi,
 } from '@/api/chat'
 import { buildJobNoteDownloadUrl, getJobNoteApi, getJobNoteLinkApi } from '@/api/jobs'
@@ -787,6 +792,7 @@ const quoteContextMenuRef = ref<HTMLElement | null>(null)
 const imeComposing = ref(false)
 const messages = ref<UiChatMessage[]>([])
 const sending = ref(false)
+const stoppingReply = ref(false)
 const isMacLikePlatform = ref(false)
 const knowledgeRetrievalEnabled = ref(false)
 const retrievalModeNetwork = ref(true)
@@ -797,6 +803,8 @@ const selectedModel = ref<string | null>(null)
 const modelsLoading = ref(false)
 const messagesContainerRef = ref<HTMLElement | null>(null)
 const sidebarLogRef = ref<HTMLElement | null>(null)
+const assistantReplyStreaming = ref(false)
+const autoFollowMessages = ref(false)
 const routeNewChatToken = ref<string>('')
 const loadingSessionMessages = ref(false)
 const skipNextRouteSessionHydrateUuid = ref('')
@@ -832,7 +840,10 @@ const loadingCurrentJobNote = ref(false)
 const syncingJobNoteMessageByJobId = ref<Record<string, boolean>>({})
 const childNoteLoadingByJobId = ref<Record<string, boolean>>({})
 const activeSearchTaskLogs = ref<Array<{ ts?: string; message: string }>>([])
+const activeChatRequestId = ref('')
+const sessionMessageCache = ref<Record<string, UiChatMessage[]>>({})
 let searchTaskPollTimer: number | null = null
+let messagesScrollFrame: number | null = null
 
 const currentSseButtonText = computed(() => {
   const s = currentJobState.value?.sseStatus
@@ -950,6 +961,10 @@ onMounted(async () => {
 onUnmounted(() => {
   stopSearchTaskPolling()
   closeQuoteContextMenu()
+  if (typeof window !== 'undefined' && messagesScrollFrame !== null) {
+    window.cancelAnimationFrame(messagesScrollFrame)
+    messagesScrollFrame = null
+  }
   if (typeof window !== 'undefined') {
     window.removeEventListener('pointerdown', handleGlobalPointerDown)
     window.removeEventListener('scroll', closeQuoteContextMenu, true)
@@ -970,8 +985,59 @@ function revokeComposerImagePreview(url?: string) {
   }
 }
 
+function isMessagesNearBottom(el?: HTMLElement | null, threshold = 48) {
+  const node = el || messagesContainerRef.value
+  if (!node) return true
+  return node.scrollHeight - node.scrollTop - node.clientHeight <= threshold
+}
+
+function queueMessagesScrollToBottom(force = false) {
+  if (!force && !autoFollowMessages.value) return
+  if (typeof window === 'undefined') return
+  if (messagesScrollFrame !== null) return
+  messagesScrollFrame = window.requestAnimationFrame(() => {
+    messagesScrollFrame = null
+    const el = messagesContainerRef.value
+    if (!el) return
+    if (!force && !autoFollowMessages.value) return
+    el.scrollTop = el.scrollHeight
+  })
+}
+
+function beginAssistantReplyAutoFollow() {
+  assistantReplyStreaming.value = true
+  autoFollowMessages.value = true
+  queueMessagesScrollToBottom(true)
+}
+
+function endAssistantReplyAutoFollow() {
+  assistantReplyStreaming.value = false
+  autoFollowMessages.value = false
+}
+
+function handleMessagesScroll() {
+  if (!assistantReplyStreaming.value) return
+  autoFollowMessages.value = isMessagesNearBottom()
+}
+
 function makeComposerImageLocalId() {
   return `img-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+function makeClientRequestId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID().replace(/-/g, '')
+  }
+  return `req-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+function cacheSessionMessages(sessionUuid: string, items: UiChatMessage[]) {
+  const sid = String(sessionUuid || '').trim()
+  if (!sid) return
+  sessionMessageCache.value = {
+    ...sessionMessageCache.value,
+    [sid]: items,
+  }
 }
 
 function summarizeQuote(text: string) {
@@ -1166,8 +1232,83 @@ function sanitizeEvidenceTagText(v: string) {
   s = s.replace(/\[E\d+_\d+\]/g, '')
   s = s.replace(/\[E\d+_\d*$/g, '')
   s = mergeDuplicateReferenceSections(s)
+  s = repairLooseMarkdownTables(s)
+  s = normalizeLooseMarkdown(s)
   s = s.replace(/\n{3,}/g, '\n\n')
   return s
+}
+
+function repairLooseMarkdownTables(raw: string) {
+  const text = String(raw || '')
+  if (!text.trim() || !text.includes('|')) return text
+  const out: string[] = []
+  const lines = text.replace(/\r\n/g, '\n').split('\n')
+
+  const normalizeTableSegment = (segment: string) => {
+    let s = String(segment || '').trim()
+    if (!s) return ''
+    if (!s.startsWith('|')) s = `|${s}`
+    if (!s.endsWith('|')) s = `${s}|`
+    return s
+  }
+
+  const looksLikeTableSegment = (segment: string) => {
+    const normalized = normalizeTableSegment(segment)
+    if (!normalized) return false
+    const pipeCount = (normalized.match(/\|/g) || []).length
+    if (pipeCount < 3) return false
+    if (/^\|\s*:?-{3,}/.test(normalized)) return true
+    return normalized.includes('|')
+  }
+
+  for (const line of lines) {
+    const rawLine = String(line || '')
+    if (!rawLine.includes('||')) {
+      out.push(rawLine)
+      continue
+    }
+    const chunks = rawLine.split('||').map((x) => String(x || '').trim()).filter(Boolean)
+    if (!chunks.length || !chunks.some(looksLikeTableSegment)) {
+      out.push(rawLine)
+      continue
+    }
+    for (const chunk of chunks) {
+      const firstPipe = chunk.indexOf('|')
+      const prefix = firstPipe > 0 ? chunk.slice(0, firstPipe).trim() : ''
+      const remainder = firstPipe > 0 ? chunk.slice(firstPipe) : chunk
+      if (prefix) out.push(prefix)
+      if (looksLikeTableSegment(remainder)) out.push(normalizeTableSegment(remainder))
+      else if (!prefix) out.push(chunk)
+    }
+  }
+
+  return out.join('\n')
+}
+
+function normalizeLooseMarkdown(raw: string) {
+  let s = String(raw || '')
+  if (!s.trim()) return ''
+  s = s.replace(/\r\n/g, '\n')
+  s = s.replace(/(^|\n)(#{1,6})([^\s#])/g, '$1$2 $3')
+  s = s.replace(/([^\n])\s*(---)\s*(#{1,6}\s*)/g, '$1\n\n$2\n\n$3')
+  s = s.replace(/([^\n])\s*(#{1,6}\s*)/g, '$1\n\n$2')
+  s = s.replace(/(^|\n)(\d+\.)\*\*/g, '$1$2 **')
+  s = s.replace(/(^|\n)([-*])([^\s])/g, '$1$2 $3')
+  s = s.replace(/([^\n])((?:\n)?(?:#{1,6}\s|---\s*$))/gm, '$1\n\n$2')
+  s = s
+    .split('\n')
+    .map((line) => {
+      const m = line.match(/^(\s{0,3}#{1,6}\s+)(.+)$/)
+      if (!m) return line
+      const titleText = String(m[2] || '').trim()
+      const looksTooLong = titleText.length > 30
+      const looksLikeSentence = /[，。！？；：,.!?;:]/.test(titleText)
+      if (looksTooLong || looksLikeSentence) return titleText
+      return line
+    })
+    .join('\n')
+  s = s.replace(/\n{3,}/g, '\n\n')
+  return s.trim()
 }
 
 function mergeDuplicateReferenceSections(raw: string) {
@@ -1414,16 +1555,6 @@ watch(
   { immediate: true },
 )
 
-watch(
-  messages,
-  async () => {
-    await nextTick()
-    const el = messagesContainerRef.value
-    if (el) el.scrollTop = el.scrollHeight
-  },
-  { deep: true },
-)
-
 // Auto-scroll task log panel to bottom on new log entries
 watch(
   () => (currentJobState.value?.logs || []).length,
@@ -1540,6 +1671,18 @@ async function loadSessionFromRoute(sessionUuidFromRoute: string) {
     return
   }
   try {
+    const cachedMessages = sessionMessageCache.value[sessionUuid]
+    if (Array.isArray(cachedMessages) && cachedMessages.some((m) => Boolean(m.pending || m.streaming))) {
+      const previousJobId = String(jobsStore.currentJobId || '').trim()
+      if (previousJobId) jobsStore.disconnectJobEvents(previousJobId, false)
+      jobsStore.currentJobId = ''
+      chatStore.setCurrentSession(sessionUuid)
+      chatSessionUuid.value = sessionUuid
+      messages.value = cachedMessages
+      candidatePageState.value = {}
+      await bootstrapCurrentJob()
+      return
+    }
     const previousJobId = String(jobsStore.currentJobId || '').trim()
     if (previousJobId) jobsStore.disconnectJobEvents(previousJobId, false)
     jobsStore.currentJobId = ''
@@ -1584,6 +1727,7 @@ async function loadSessionFromRoute(sessionUuidFromRoute: string) {
       preferMarkdown: false,
     }))
     messages.value = loaded
+    cacheSessionMessages(sessionUuid, loaded)
 
     const taskJobIds = loaded
       .filter((m) => m.role === 'assistant' && m.task?.job_id)
@@ -1650,6 +1794,7 @@ function appendUiMessage(payload: Partial<UiChatMessage> & Pick<UiChatMessage, '
     preferMarkdown: Boolean(payload.preferMarkdown),
   }
   messages.value.push(item)
+  cacheSessionMessages(chatSessionUuid.value, messages.value)
   const last = messages.value[messages.value.length - 1]
   return (last || item) as UiChatMessage
 }
@@ -1692,6 +1837,20 @@ function mapAssistantMessage(msg: ChatMessage, task: JobCreateResponse | null, t
   })
 }
 
+async function stopCurrentReply() {
+  const sessionUuid = String(chatSessionUuid.value || '').trim()
+  const clientRequestId = String(activeChatRequestId.value || '').trim()
+  if (!sending.value || !sessionUuid || !clientRequestId || stoppingReply.value) return
+  stoppingReply.value = true
+  try {
+    await stopChatMessageStreamApi(sessionUuid, { client_request_id: clientRequestId })
+  } catch (e: any) {
+    message.error(e?.message || '停止回复失败')
+  } finally {
+    stoppingReply.value = false
+  }
+}
+
 async function sendMessage() {
   const text = userInput.value.trim()
   const quote = composerQuote.value ? { ...composerQuote.value } : null
@@ -1721,6 +1880,7 @@ async function sendMessage() {
   userInput.value = ''
   composerQuote.value = null
   composerImages.value = []
+  const clientRequestId = makeClientRequestId()
   const effectiveAutoTask = knowledgeRetrievalEnabled.value && !hasRichContext
   const effectiveSearchModes = effectiveAutoTask ? selectedSearchModes.value : []
   const pendingAssistant = appendUiMessage({
@@ -1732,11 +1892,14 @@ async function sendMessage() {
     renderAsMarkdown: true,
     preferMarkdown: true,
   })
+  beginAssistantReplyAutoFollow()
   sending.value = true
+  activeChatRequestId.value = clientRequestId
   let shouldRevokeSentImages = false
 
   try {
     const sessionUuid = await ensureChatSession()
+    cacheSessionMessages(sessionUuid, messages.value)
     let taskInfo: JobCreateResponse | null = null
     let toolDecisionReason = ''
     let shouldCreateJob = false
@@ -1799,6 +1962,7 @@ async function sendMessage() {
         pendingAssistant.streaming = true
         pendingAssistant.content = `${pendingAssistant.content || ''}${chunk}`
         pendingAssistant.content = sanitizeEvidenceTagText(pendingAssistant.content)
+        queueMessagesScrollToBottom()
       }
       if (!typewriterBuffer.length && finalDoneText && !String(pendingAssistant.content || '').trim()) {
         pendingAssistant.content = finalDoneText
@@ -1820,6 +1984,7 @@ async function sendMessage() {
       sessionUuid,
       {
         content: text,
+        client_request_id: clientRequestId,
         images: images.map(({ previewUrl, uploadStatus, uploadProgress, errorMessage, sourceFile, localId, ...img }) => img),
         quote: quote?.content ? quote : null,
         model_name: selectedModel.value || '',
@@ -1878,6 +2043,7 @@ async function sendMessage() {
           pendingAssistant.pending = true
           pendingAssistant.streaming = true
           if (!pendingAssistant.content) pendingAssistant.content = ''
+          beginAssistantReplyAutoFollow()
         },
         onDelta: (deltaText) => {
           gotAnyDelta = gotAnyDelta || !!deltaText
@@ -1958,6 +2124,7 @@ async function sendMessage() {
 
     pendingAssistant.pending = false
     pendingAssistant.streaming = false
+    endAssistantReplyAutoFollow()
     pendingAssistant.toolDecisionReason = toolDecisionReason || pendingAssistant.toolDecisionReason
     if (typewriterTimer !== null) {
       while (typewriterBuffer.length) typewriterTick()
@@ -2033,7 +2200,8 @@ async function sendMessage() {
     pendingAssistant.pending = false
     pendingAssistant.streaming = false
     pendingAssistant.searchProgressVisible = false
-    pendingAssistant.content = `发送失败：${e?.message || '未知错误'}`
+      pendingAssistant.content = `发送失败：${e?.message || '未知错误'}`
+    endAssistantReplyAutoFollow()
     const errText = String(e?.message || '')
     if (/额度|quota|chat_quota|次数/.test(errText)) {
       void authStore.fetchMe().then(() => {
@@ -2042,10 +2210,13 @@ async function sendMessage() {
     }
     message.error(e?.message || '发送失败')
   } finally {
+    endAssistantReplyAutoFollow()
     if (shouldRevokeSentImages) {
       for (const img of images) revokeComposerImagePreview(img.previewUrl)
     }
     sending.value = false
+    activeChatRequestId.value = ''
+    cacheSessionMessages(chatSessionUuid.value, messages.value)
   }
 }
 
@@ -3325,6 +3496,16 @@ function humanizeSidebarLog(text: string) {
   transform: translateY(-1px);
 }
 
+.send-icon-btn--stopping {
+  color: #b91c1c;
+  border-color: rgba(239, 68, 68, 0.36);
+}
+
+.send-icon-btn--stopping:hover:not(:disabled) {
+  border-color: rgba(239, 68, 68, 0.52);
+  box-shadow: 0 10px 24px rgba(127, 29, 29, 0.14);
+}
+
 .send-icon-btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
@@ -3337,6 +3518,11 @@ function humanizeSidebarLog(text: string) {
   color: #f8fafc;
   border-color: rgba(107, 114, 128, 0.65);
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.32);
+}
+
+:global(.dark) .send-icon-btn--stopping {
+  color: #fca5a5;
+  border-color: rgba(248, 113, 113, 0.38);
 }
 
 .send-icon-spinner {
@@ -3402,7 +3588,22 @@ function humanizeSidebarLog(text: string) {
 }
 
 .message-bubble--markdown :deep(.md-content) {
+  font-size: 0.88rem;
+  line-height: 1.65;
+}
+
+.message-bubble--markdown :deep(.md-content h1) {
+  font-size: 0.96rem;
+  line-height: 1.5;
+}
+
+.message-bubble--markdown :deep(.md-content h2) {
   font-size: 0.92rem;
+}
+
+.message-bubble--markdown :deep(.md-content h3),
+.message-bubble--markdown :deep(.md-content h4) {
+  font-size: 0.88rem;
 }
 
 :global(.dark) .message-quote-chip {

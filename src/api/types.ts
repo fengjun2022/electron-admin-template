@@ -380,6 +380,7 @@ export interface ChatMessagesResponse {
 
 export interface ChatReplyRequest {
   content: string
+  client_request_id?: string
   images?: ChatImageAttachment[]
   quote?: ChatQuoteReference | null
   model_name?: string
@@ -406,6 +407,17 @@ export interface ChatImageDeleteResponse {
   ok: boolean
   bucket: string
   object_name: string
+}
+
+export interface ChatReplyStopRequest {
+  client_request_id: string
+}
+
+export interface ChatReplyStopResponse {
+  ok: boolean
+  session_uuid: string
+  client_request_id: string
+  stopped: boolean
 }
 
 export interface ChatReplyResponse {
