@@ -1914,9 +1914,6 @@ async function sendMessage() {
           if (finalDoneText) {
             pendingAssistant.content = finalDoneText
           }
-          if (effectiveAutoTask && !backendSearchDispatchEnabled && !taskInfo && !shouldCreateJob) {
-            message.info('本次未创建任务：AI 判断为普通对话/咨询')
-          }
         },
         onSaved: (savedData) => {
           const msg = (savedData?.assistant_message || null) as ChatMessage | null
