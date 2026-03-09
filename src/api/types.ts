@@ -123,6 +123,22 @@ export interface JobCreateResponse {
   created_at: string
 }
 
+export interface AdminJobPushLogEvent {
+  type?: string
+  ts?: string
+  message?: string
+  raw_message?: string
+  public_message?: string
+  [key: string]: unknown
+}
+
+export interface AdminJobPushLogsResponse {
+  ok: boolean
+  job_id: string
+  count: number
+  items: AdminJobPushLogEvent[]
+}
+
 export interface VideoRunState {
   bili_url: string
   title?: string

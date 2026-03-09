@@ -370,9 +370,11 @@ export const useJobsStore = defineStore('jobs', {
           const closeReason = String(ev?.reason || '')
           // 后端主动释放连接：空闲超时 / 等待用户选择 / 连接数上限，不自动重连，避免无意义占用资源。
           if (closeCode === 4002 || closeCode === 4003 || closeCode === 4429
+            || closeCode === 4404
             || closeReason.includes('idle_timeout')
             || closeReason.includes('awaiting_user_pick')
             || closeReason.includes('too many connections')
+            || closeReason.includes('job not found')
             || closeReason.includes('job_terminal')) {
             jobUi.sseStatus = 'disconnected'
             return

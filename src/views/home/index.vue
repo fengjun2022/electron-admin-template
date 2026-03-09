@@ -615,9 +615,32 @@
               <div class="rail-section rail-section--plain">
                 <div class="flex items-center justify-between gap-2 mb-2">
                   <div class="text-xs opacity-70">任务/检索线程日志（最近）</div>
-                  <n-tag size="small" type="default">{{ currentSidebarLogs.length }}</n-tag>
+                  <div class="flex items-center gap-2">
+                    <n-space v-if="isAdminUser" size="small">
+                      <n-button
+                        size="tiny"
+                        quaternary
+                        :type="sidebarLogViewMode === 'normal' ? 'primary' : 'default'"
+                        @click="setSidebarLogViewMode('normal')"
+                      >
+                        普通
+                      </n-button>
+                      <n-button
+                        size="tiny"
+                        quaternary
+                        :type="sidebarLogViewMode === 'detail' ? 'primary' : 'default'"
+                        @click="setSidebarLogViewMode('detail')"
+                      >
+                        详细
+                      </n-button>
+                    </n-space>
+                    <n-tag size="small" type="default">{{ currentSidebarLogs.length }}</n-tag>
+                  </div>
                 </div>
                 <div ref="sidebarLogRef" class="rail-subpanel p-2 max-h-[220px] overflow-auto">
+                  <div v-if="isSidebarDetailMode && sidebarDetailedLogsLoading" class="text-xs opacity-60 py-2">
+                    正在加载详细日志...
+                  </div>
                   <template v-if="currentSidebarLogs.length">
                     <div
                       v-for="(log, idx) in currentSidebarLogs"
@@ -743,7 +766,7 @@ import {
   stopChatMessageStreamApi,
   uploadChatImageApi,
 } from '@/api/chat'
-import { buildJobNoteDownloadUrl, getJobNoteApi, getJobNoteLinkApi } from '@/api/jobs'
+import { buildJobNoteDownloadUrl, getAdminJobPushLogsApi, getJobNoteApi, getJobNoteLinkApi } from '@/api/jobs'
 import type { ChatImageAttachment, ChatMessage, ChatModelItem, ChatQuoteReference, JobCreateResponse, TopicQueueBatchSummary, TopicSelectedVideo } from '@/api/types'
 import MarkdownContent from '@/components/MarkdownContent.vue'
 
@@ -848,10 +871,14 @@ const loadingCurrentJobNote = ref(false)
 const syncingJobNoteMessageByJobId = ref<Record<string, boolean>>({})
 const childNoteLoadingByJobId = ref<Record<string, boolean>>({})
 const activeSearchTaskLogs = ref<Array<{ ts?: string; message: string }>>([])
+const sidebarLogViewMode = ref<'normal' | 'detail'>('normal')
+const sidebarDetailedLogsLoading = ref(false)
+const sidebarDetailedLogs = ref<Array<{ ts?: string; message: string }>>([])
 const activeChatRequestId = ref('')
 const sessionMessageCache = ref<Record<string, UiChatMessage[]>>({})
 let searchTaskPollTimer: number | null = null
 let messagesScrollFrame: number | null = null
+let lastResumeSyncAt = 0
 
 const currentSseButtonText = computed(() => {
   const s = currentJobState.value?.sseStatus
@@ -898,7 +925,15 @@ const selectedSearchModes = computed(() => {
   return modes
 })
 
+const isAdminUser = computed(() => String(authStore.user?.role || '') === 'admin')
+const isSidebarDetailMode = computed(
+  () => isAdminUser.value && sidebarLogViewMode.value === 'detail',
+)
+
 const currentSidebarLogs = computed(() => {
+  if (isSidebarDetailMode.value) {
+    return [...sidebarDetailedLogs.value].slice(-80)
+  }
   const jobLogs = (currentJobState.value?.logs || []).slice(-40).map((x) => ({
     ts: x.ts,
     message: humanizeSidebarLog(x.message || ''),
@@ -942,6 +977,54 @@ const taskSnapshotByJob = computed(() => {
   return out
 })
 
+function setSidebarLogViewMode(mode: 'normal' | 'detail') {
+  if (mode === 'detail' && !isAdminUser.value) {
+    sidebarLogViewMode.value = 'normal'
+    return
+  }
+  sidebarLogViewMode.value = mode
+}
+
+function formatAdminDetailLogMessage(row: any) {
+  const type = String(row?.type || '').trim().toLowerCase()
+  const rawMessage = String(row?.raw_message || '').trim()
+  const message = String(row?.message || '').trim()
+  const publicMessage = String(row?.public_message || '').trim()
+  const text = rawMessage || message || publicMessage
+  if (text) return text
+  if (type === 'status') {
+    const stage = String(row?.stage || '').trim()
+    const detail = String(row?.detail || '').trim()
+    return [stage, detail].filter(Boolean).join(' · ') || '状态更新'
+  }
+  return type ? `[${type}]` : '日志事件'
+}
+
+async function refreshSidebarDetailedLogs() {
+  const jobId = String(jobsStore.currentJobId || '').trim()
+  if (!jobId || !isSidebarDetailMode.value) {
+    sidebarDetailedLogs.value = []
+    return
+  }
+  sidebarDetailedLogsLoading.value = true
+  try {
+    const res = await getAdminJobPushLogsApi(jobId, { limit: 500, includeNonLog: true })
+    const items = Array.isArray((res as any)?.items) ? ((res as any).items as any[]) : []
+    sidebarDetailedLogs.value = items
+      .map((row) => ({
+        ts: String((row as any)?.ts || ''),
+        message: formatAdminDetailLogMessage(row),
+      }))
+      .filter((x) => String(x.message || '').trim())
+      .slice(-240)
+  } catch (e: any) {
+    sidebarDetailedLogs.value = []
+    message.error(e?.message || '加载详细日志失败')
+  } finally {
+    sidebarDetailedLogsLoading.value = false
+  }
+}
+
 onMounted(async () => {
   globalStore.setBreadcrumbBarVisible(false)
   syncUserSignatureFromAuth()
@@ -963,6 +1046,8 @@ onMounted(async () => {
     window.addEventListener('pointerdown', handleGlobalPointerDown)
     window.addEventListener('scroll', closeQuoteContextMenu, true)
     window.addEventListener('keydown', handleGlobalKeydown)
+    window.addEventListener('focus', handleWindowFocus)
+    document.addEventListener('visibilitychange', handleDocumentVisibilityChange)
   }
 })
 
@@ -977,6 +1062,8 @@ onUnmounted(() => {
     window.removeEventListener('pointerdown', handleGlobalPointerDown)
     window.removeEventListener('scroll', closeQuoteContextMenu, true)
     window.removeEventListener('keydown', handleGlobalKeydown)
+    window.removeEventListener('focus', handleWindowFocus)
+    document.removeEventListener('visibilitychange', handleDocumentVisibilityChange)
   }
   for (const img of composerImages.value) {
     revokeComposerImagePreview(img.previewUrl)
@@ -1417,9 +1504,26 @@ watch(
   { immediate: true },
 )
 
+watch(
+  () => [isAdminUser.value, sidebarLogViewMode.value, jobsStore.currentJobId] as const,
+  async ([isAdmin, mode, jobId]) => {
+    if (!isAdmin && mode !== 'normal') {
+      sidebarLogViewMode.value = 'normal'
+      sidebarDetailedLogs.value = []
+      return
+    }
+    if (mode === 'detail' && jobId) {
+      await refreshSidebarDetailedLogs()
+      return
+    }
+    sidebarDetailedLogs.value = []
+  },
+  { immediate: true },
+)
+
 // Auto-scroll task log panel to bottom on new log entries
 watch(
-  () => (currentJobState.value?.logs || []).length,
+  () => currentSidebarLogs.value.length,
   async () => {
     await nextTick()
     const el = sidebarLogRef.value
@@ -1435,26 +1539,54 @@ watch(
   },
 )
 
+function isActiveJobStatus(status: string) {
+  const s = String(status || '').trim()
+  return s === 'running' || s === 'queued' || s === 'waiting_user_pick'
+}
+
+async function syncCurrentJobRuntime(options: { forceReconnect?: boolean; silent?: boolean } = {}) {
+  const jobId = String(jobsStore.currentJobId || '').trim()
+  if (!jobId) return
+  const forceReconnect = Boolean(options.forceReconnect)
+  const silent = options.silent !== false
+  try {
+    const snap = await jobsStore.fetchJob(jobId)
+    const st = String(snap?.status || '')
+    if (isActiveJobStatus(st)) {
+      jobsStore.connectJobEvents(jobId, forceReconnect || currentJobState.value?.sseStatus !== 'connected')
+    } else if (st === 'completed') {
+      await loadCurrentJobNoteAssets({ silent: true })
+    } else if (currentJobState.value?.sseStatus === 'connected' || currentJobState.value?.sseStatus === 'connecting') {
+      jobsStore.disconnectJobEvents(jobId, false)
+    }
+  } catch (e: any) {
+    if (!silent) {
+      message.error(e?.message || '同步任务状态失败')
+    }
+  }
+}
+
+function scheduleResumeSync(forceReconnect = true) {
+  const now = Date.now()
+  if (now - lastResumeSyncAt < 1200) return
+  lastResumeSyncAt = now
+  void syncCurrentJobRuntime({ forceReconnect, silent: true })
+}
+
+function handleWindowFocus() {
+  scheduleResumeSync(true)
+}
+
+function handleDocumentVisibilityChange() {
+  if (typeof document === 'undefined') return
+  if (document.visibilityState === 'visible') {
+    scheduleResumeSync(true)
+  }
+}
+
 async function bootstrapCurrentJob() {
-  if (jobsStore.currentJobId && !currentSnapshot.value) {
-    try {
-      const snap = await jobsStore.fetchJob(jobsStore.currentJobId)
-      const st = String(snap?.status || '')
-      if (st === 'running' || st === 'queued' || st === 'waiting_user_pick') {
-        jobsStore.connectJobEvents(jobsStore.currentJobId, true)
-      }
-    } catch {
-      // ignore bootstrap errors
-    }
-    return
-  }
-  if (jobsStore.currentJobId && currentSnapshot.value) {
-    const st = String(currentSnapshot.value.status || '')
-    if ((st === 'running' || st === 'queued' || st === 'waiting_user_pick')
-      && currentJobState.value?.sseStatus !== 'connected') {
-      jobsStore.connectJobEvents(jobsStore.currentJobId, true)
-    }
-  }
+  if (!jobsStore.currentJobId) return
+  await syncCurrentJobRuntime({ forceReconnect: true, silent: true })
 }
 
 async function loadChatModels() {
@@ -1529,7 +1661,7 @@ async function loadSessionFromRoute(sessionUuidFromRoute: string) {
     return
   }
   if (chatSessionUuid.value === sessionUuid && messages.value.length > 0) {
-    await bootstrapCurrentJob()
+    await syncCurrentJobRuntime({ forceReconnect: true, silent: true })
     return
   }
   try {
@@ -1542,7 +1674,7 @@ async function loadSessionFromRoute(sessionUuidFromRoute: string) {
       chatSessionUuid.value = sessionUuid
       messages.value = cachedMessages
       candidatePageState.value = {}
-      await bootstrapCurrentJob()
+      await syncCurrentJobRuntime({ forceReconnect: true, silent: true })
       return
     }
     const previousJobId = String(jobsStore.currentJobId || '').trim()
@@ -1614,10 +1746,7 @@ async function loadSessionFromRoute(sessionUuidFromRoute: string) {
       const olderJobIds = taskJobIds.slice(0, -1)
       void Promise.allSettled(olderJobIds.map((jid) => jobsStore.fetchJob(jid)))
       try {
-        const snap = await jobsStore.fetchJob(latestTaskJobId)
-        if (snap?.status === 'running' || snap?.status === 'queued' || snap?.status === 'waiting_user_pick') {
-          jobsStore.connectJobEvents(latestTaskJobId, true)
-        }
+        await syncCurrentJobRuntime({ forceReconnect: true, silent: true })
       } catch {
         // ignore task bootstrap errors when restoring chat history
       }
@@ -2083,6 +2212,9 @@ async function refreshCurrentJob() {
   if (!jobsStore.currentJobId) return
   try {
     await jobsStore.fetchJob(jobsStore.currentJobId)
+    if (isSidebarDetailMode.value) {
+      await refreshSidebarDetailedLogs()
+    }
     if (currentSnapshot.value?.status === 'completed') {
       await loadCurrentJobNoteAssets({ silent: true })
     }

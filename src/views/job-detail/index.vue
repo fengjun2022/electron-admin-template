@@ -97,8 +97,31 @@
       <n-grid :cols="2" x-gap="12" y-gap="12">
         <n-gi>
           <n-card title="AI 过程日志" :bordered="false">
+            <template #header-extra>
+              <n-space v-if="isAdminUser" size="small">
+                <n-button
+                  size="tiny"
+                  quaternary
+                  :type="logViewMode === 'normal' ? 'primary' : 'default'"
+                  @click="setLogViewMode('normal')"
+                >
+                  普通
+                </n-button>
+                <n-button
+                  size="tiny"
+                  quaternary
+                  :type="logViewMode === 'detail' ? 'primary' : 'default'"
+                  @click="setLogViewMode('detail')"
+                >
+                  详细
+                </n-button>
+              </n-space>
+            </template>
 
             <div ref="aiLogsContainerRef" class="h-[420px] overflow-auto rounded-md p-3 job-scroll-panel">
+              <div v-if="isDetailMode && detailLogsLoading" class="text-xs opacity-60 py-2">
+                正在加载详细日志...
+              </div>
               <template v-if="displayLogs.length">
                 <div
                   v-for="(log, idx) in displayLogs"
@@ -273,7 +296,8 @@ import {
 } from 'naive-ui'
 import { useJobsStore } from '@/stores/modules/useJobsStore'
 import { useChatStore } from '@/stores/modules/useChatStore'
-import { buildJobNoteDownloadUrl } from '@/api/jobs'
+import { useAuthStore } from '@/stores/modules/useAuthStore'
+import { buildJobNoteDownloadUrl, getAdminJobPushLogsApi } from '@/api/jobs'
 import { getApiBaseUrl } from '@/api/client'
 import MarkdownContent from '@/components/MarkdownContent.vue'
 
@@ -282,10 +306,14 @@ const router = useRouter()
 const message = useMessage()
 const jobsStore = useJobsStore()
 const chatStore = useChatStore()
+const authStore = useAuthStore()
 
 const loadingJob = ref(false)
 const loadingNote = ref(false)
 const aiLogsContainerRef = ref<HTMLElement | null>(null)
+const logViewMode = ref<'normal' | 'detail'>('normal')
+const detailLogsLoading = ref(false)
+const detailLogs = ref<Array<{ ts?: string; message: string }>>([])
 
 const jobId = computed(() => String(route.params.jobId || ''))
 const jobState = computed(() => jobsStore.jobs[jobId.value] || null)
@@ -324,6 +352,8 @@ const noteDownloadFullUrl = computed(() => {
   if (!jobId.value || !noteLink.value) return undefined
   return buildJobNoteDownloadUrl(jobId.value)
 })
+const isAdminUser = computed(() => String(authStore.user?.role || '') === 'admin')
+const isDetailMode = computed(() => isAdminUser.value && logViewMode.value === 'detail')
 
 const sseBtnText = computed(() => (jobState.value?.sseStatus === 'connected' ? '暂停实时连接' : '开启实时连接'))
 const sourceSessionFromRoute = computed(() => String(route.query.session || '').trim())
@@ -386,6 +416,13 @@ const stageFriendlyHint = computed(() => {
 })
 
 const displayLogs = computed(() => {
+  if (isDetailMode.value) {
+    return detailLogs.value.map((x) => ({
+      ts: x.ts,
+      message: String(x.message || ''),
+      tone: inferLogTone(x.message || ''),
+    }))
+  }
   const logs = jobState.value?.logs || []
   return logs.map((x) => ({
     ts: x.ts,
@@ -413,6 +450,70 @@ const displayEvents = computed(() => {
     })
 })
 
+function setLogViewMode(mode: 'normal' | 'detail') {
+  if (mode === 'detail' && !isAdminUser.value) {
+    logViewMode.value = 'normal'
+    return
+  }
+  logViewMode.value = mode
+}
+
+function formatAdminDetailLogMessage(row: any) {
+  const type = String(row?.type || '').trim().toLowerCase()
+  const rawMessage = String(row?.raw_message || '').trim()
+  const message = String(row?.message || '').trim()
+  const publicMessage = String(row?.public_message || '').trim()
+  const text = rawMessage || message || publicMessage
+  if (text) return text
+  if (type === 'status') {
+    const stage = String(row?.stage || '').trim()
+    const detail = String(row?.detail || '').trim()
+    return [stage, detail].filter(Boolean).join(' · ') || '状态更新'
+  }
+  return type ? `[${type}]` : '日志事件'
+}
+
+async function loadDetailLogs() {
+  if (!isDetailMode.value || !jobId.value) {
+    detailLogs.value = []
+    return
+  }
+  detailLogsLoading.value = true
+  try {
+    const res = await getAdminJobPushLogsApi(jobId.value, { limit: 1000, includeNonLog: true })
+    const items = Array.isArray((res as any)?.items) ? ((res as any).items as any[]) : []
+    detailLogs.value = items
+      .map((row) => ({
+        ts: String((row as any)?.ts || ''),
+        message: formatAdminDetailLogMessage(row),
+      }))
+      .filter((x) => String(x.message || '').trim())
+      .slice(-1000)
+  } catch (e: any) {
+    detailLogs.value = []
+    message.error(e?.message || '加载详细日志失败')
+  } finally {
+    detailLogsLoading.value = false
+  }
+}
+
+watch(
+  () => [jobId.value, isAdminUser.value, logViewMode.value] as const,
+  async ([id, isAdmin, mode]) => {
+    if (!isAdmin && mode !== 'normal') {
+      logViewMode.value = 'normal'
+      detailLogs.value = []
+      return
+    }
+    if (id && mode === 'detail') {
+      await loadDetailLogs()
+      return
+    }
+    detailLogs.value = []
+  },
+  { immediate: true },
+)
+
 watch(
   () => displayLogs.value.length,
   async () => {
@@ -428,6 +529,9 @@ async function refreshJob() {
   loadingJob.value = true
   try {
     const snap = await jobsStore.fetchJob(jobId.value)
+    if (isDetailMode.value) {
+      await loadDetailLogs()
+    }
     if (snap.status === 'completed') {
       await Promise.allSettled([jobsStore.fetchNote(jobId.value), jobsStore.fetchNoteLink(jobId.value)])
     }
@@ -692,8 +796,8 @@ async function bootstrap() {
   if (!jobId.value) return
   jobsStore.setCurrentJob(jobId.value)
   await refreshJob()
-  if (job.value?.status === 'running' || job.value?.status === 'queued') {
-    jobsStore.connectJobEvents(jobId.value)
+  if (job.value?.status === 'running' || job.value?.status === 'queued' || job.value?.status === 'waiting_user_pick') {
+    jobsStore.connectJobEvents(jobId.value, true)
   }
 }
 

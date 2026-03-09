@@ -1,5 +1,11 @@
 import { apiRequest, buildApiUrl, getAuthToken } from './client'
-import type { JobCreateRequest, JobCreateResponse, JobNoteLinkResponse, JobSnapshot } from './types'
+import type {
+  AdminJobPushLogsResponse,
+  JobCreateRequest,
+  JobCreateResponse,
+  JobNoteLinkResponse,
+  JobSnapshot,
+} from './types'
 
 export function createJobApi(payload: JobCreateRequest) {
   return apiRequest<JobCreateResponse>('/jobs', {
@@ -58,4 +64,19 @@ export function buildJobNoteDownloadUrl(jobId: string) {
   const token = getAuthToken()
   if (token) u.searchParams.set('token', token)
   return u.toString()
+}
+
+export function getAdminJobPushLogsApi(
+  jobId: string,
+  options: { limit?: number; includeNonLog?: boolean } = {},
+) {
+  const limit = Math.max(1, Number(options.limit || 500))
+  const includeNonLog = options.includeNonLog ? 'true' : 'false'
+  return apiRequest<AdminJobPushLogsResponse>(
+    `/admin/jobs/${encodeURIComponent(jobId)}/push-logs?limit=${encodeURIComponent(String(limit))}&include_non_log=${includeNonLog}`,
+    {
+      method: 'GET',
+      auth: true,
+    },
+  )
 }
