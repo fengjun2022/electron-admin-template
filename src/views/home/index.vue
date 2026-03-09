@@ -251,32 +251,52 @@
                             :key="`${msg.task.job_id}-${video.url || video.title || idx}`"
                             class="rounded-xl p-2 ai-candidate-card flex flex-col"
                           >
-                            <!-- Thumbnail -->
-                            <button
-                              type="button"
-                              class="rounded-lg overflow-hidden ai-candidate-cover mb-2"
-                              @click="handleCandidateCoverClick(msg.task.job_id, video)"
-                            >
-                              <img
-                                v-if="videoCoverUrl(video)"
-                                :src="videoCoverUrl(video) || undefined"
-                                alt="视频封面"
-                                class="w-full aspect-video object-cover"
-                                loading="lazy"
-                                referrerpolicy="no-referrer"
-                              />
-                              <div v-else class="w-full aspect-video flex items-center justify-center text-xs opacity-60">
-                                暂无封面
-                              </div>
-                              <div
-                                v-if="videoEmbedUrl(video)"
-                                class="ai-candidate-cover__overlay"
+                            <!-- Thumbnail / Inline Player -->
+                            <div class="rounded-lg overflow-hidden ai-candidate-cover mb-2">
+                              <template v-if="activeVideoPreviewKey(msg.task.job_id) === videoPreviewKey(video) && videoEmbedUrl(video)">
+                                <iframe
+                                  :src="videoEmbedUrl(video) || undefined"
+                                  class="w-full aspect-video bg-black"
+                                  frameborder="0"
+                                  allowfullscreen
+                                  scrolling="no"
+                                />
+                                <button
+                                  type="button"
+                                  class="ai-candidate-cover__collapse"
+                                  title="收起播放"
+                                  @click.stop="toggleVideoPreview(msg.task.job_id, video)"
+                                >
+                                  收起
+                                </button>
+                              </template>
+                              <button
+                                v-else
+                                type="button"
+                                class="ai-candidate-cover__trigger"
+                                @click="handleCandidateCoverClick(msg.task.job_id, video)"
                               >
-                                <span class="ai-candidate-cover__play" :title="activeVideoPreviewKey(msg.task.job_id) === videoPreviewKey(video) ? '收起播放' : '播放视频'">
-                                  <n-icon :component="Play" size="22" />
-                                </span>
-                              </div>
-                            </button>
+                                <img
+                                  v-if="videoCoverUrl(video)"
+                                  :src="videoCoverUrl(video) || undefined"
+                                  alt="视频封面"
+                                  class="w-full aspect-video object-cover"
+                                  loading="lazy"
+                                  referrerpolicy="no-referrer"
+                                />
+                                <div v-else class="w-full aspect-video flex items-center justify-center text-xs opacity-60">
+                                  暂无封面
+                                </div>
+                                <div
+                                  v-if="videoEmbedUrl(video)"
+                                  class="ai-candidate-cover__overlay"
+                                >
+                                  <span class="ai-candidate-cover__play" title="播放视频">
+                                    <n-icon :component="Play" size="22" />
+                                  </span>
+                                </div>
+                              </button>
+                            </div>
 
                             <!-- Content -->
                             <div class="min-w-0 flex-1 flex flex-col">
@@ -320,21 +340,9 @@
                               </n-space>
                             </div>
 
-                            <div
-                              v-if="activeVideoPreviewKey(msg.task.job_id) === videoPreviewKey(video) && videoEmbedUrl(video)"
-                              class="mt-3 overflow-hidden rounded-lg ai-candidate-preview"
-                            >
-                              <iframe
-                                :src="videoEmbedUrl(video) || undefined"
-                                class="w-full aspect-video bg-black"
-                                frameborder="0"
-                                allowfullscreen
-                                scrolling="no"
-                              />
-                            </div>
                           </div>
                         </div>
-                        <div v-if="jobVideoCandidates(msg.task.job_id).length > 10" class="mt-3 flex items-center justify-end gap-2 text-xs">
+                        <div v-if="jobVideoCandidates(msg.task.job_id).length > candidatePageSize()" class="mt-3 flex items-center justify-end gap-2 text-xs">
                           <n-button size="tiny" secondary :disabled="candidateCurrentPage(msg.task.job_id) <= 1" @click="setCandidatePage(msg.task.job_id, candidateCurrentPage(msg.task.job_id) - 1)">
                             上一页
                           </n-button>
@@ -2150,7 +2158,7 @@ function shouldRenderCandidatePanel(msg: UiChatMessage) {
 }
 
 function candidatePageSize() {
-  return 10
+  return 12
 }
 
 function candidateTotalPages(jobId: string) {
@@ -3656,9 +3664,30 @@ function humanizeSidebarLog(text: string) {
   position: relative;
   display: block;
   width: 100%;
+  overflow: hidden;
+}
+
+.ai-candidate-cover__trigger {
+  display: block;
+  width: 100%;
   border: 0;
   padding: 0;
   background: transparent;
+  cursor: pointer;
+}
+
+.ai-candidate-cover__collapse {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  border: 0;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 11px;
+  line-height: 1;
+  color: #f8fafc;
+  background: rgba(15, 23, 42, 0.72);
   cursor: pointer;
 }
 
@@ -3697,12 +3726,6 @@ function humanizeSidebarLog(text: string) {
 
 .ai-candidate-card__keyword {
   color: rgba(71, 85, 105, 0.7);
-}
-
-.ai-candidate-preview {
-  border: 1px solid rgba(203, 213, 225, 0.78);
-  background: rgba(255, 255, 255, 0.98);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55);
 }
 
 .message-user {
