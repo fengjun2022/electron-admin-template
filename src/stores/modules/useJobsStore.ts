@@ -33,8 +33,8 @@ const STAGE_LABEL_MAP: Record<string, string> = {
   merge_multi_notes: '正在合并多份笔记',
   search_candidates: '正在搜索候选视频',
   ai_select_video: 'AI 正在筛选候选视频',
-  extract_audio_url: '正在提取音频链接',
-  download_audio: '正在下载音频',
+  extract_audio_url: '正在准备音频素材',
+  download_audio: '正在准备音频素材',
   convert_mp3: '正在转换音频格式',
   demucs: '正在分离人声',
   transcribe: '正在语音转文字',
@@ -89,6 +89,12 @@ function humanizeDetail(detail?: string, stage?: string) {
 function humanizeLogMessage(text?: string) {
   const t = String(text || '').trim()
   if (!t) return ''
+  const low = t.toLowerCase()
+  if (/^run:/i.test(t)) return '正在执行处理步骤'
+  if (/开始下载|下载视频中|下载音频|下载视频|download/i.test(t)) return '正在准备媒体素材'
+  if (/视频下载完成|音频下载完成/i.test(t)) return '媒体素材准备完成'
+  if (/(\/app\/|\.m4s\b|\.mp3\b|\.mp4\b|\.wav\b|\.jpg\b|\.png\b)/i.test(t)) return '正在处理媒体素材'
+  if (/https?:\/\//i.test(t) || low.includes('链接')) return '正在处理媒体资源信息'
   return t
     .replace(/^任务已创建\s*\(([^)]+)\)\s*$/i, (_, s: string) => `任务已创建（${statusLabel(s)}）`)
     .replace(/\bwaiting_user_pick\b/gi, '等待选择视频')

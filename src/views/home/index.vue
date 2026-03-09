@@ -2662,8 +2662,8 @@ function humanizeStage(stage: string) {
   if (s === 'ai_select_video') return 'AI 正在筛选候选视频'
   if (s === 'cleanup') return '正在清理中间文件'
   if (s === 'completed' || s === 'done') return '任务已完成'
-  if (s === 'extract_audio_url') return '正在提取音频链接'
-  if (s === 'download_audio') return '正在下载音频'
+  if (s === 'extract_audio_url') return '正在准备音频素材'
+  if (s === 'download_audio') return '正在准备音频素材'
   if (s === 'convert_mp3') return '正在转换音频格式'
   if (s === 'demucs') return '正在分离人声'
   if (s === 'transcribe') return '正在语音转文字'
@@ -2692,6 +2692,12 @@ function humanizeDetail(detail: string, stage: string) {
 function humanizeSidebarLog(text: string) {
   const t = (text || '').trim()
   if (!t) return ''
+  const low = t.toLowerCase()
+  if (/^run:/i.test(t)) return '正在执行处理步骤'
+  if (/开始下载|下载视频中|下载音频|下载视频|download/i.test(t)) return '正在准备媒体素材'
+  if (/视频下载完成|音频下载完成/i.test(t)) return '媒体素材准备完成'
+  if (/(\/app\/|\.m4s\b|\.mp3\b|\.mp4\b|\.wav\b|\.jpg\b|\.png\b)/i.test(t)) return '正在处理媒体素材'
+  if (/https?:\/\//i.test(t) || low.includes('链接')) return '正在处理媒体资源信息'
   if (t.includes('任务已创建')) return t.replace(/\((queued|running|completed|failed|waiting_user_pick|init)\)/ig, (_, s: string) => `（${statusLabel(s)}）`)
   return t
     .replace(/\bwaiting_user_pick\b/gi, '等待选择视频')

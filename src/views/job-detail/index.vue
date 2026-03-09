@@ -524,8 +524,8 @@ function humanizeStage(stage: string) {
   if (s === 'merge_multi_notes') return 'AI 正在合并多份中间笔记（归纳总结）'
   if (s === 'search_candidates') return '正在搜索候选视频'
   if (s === 'ai_select_video') return 'AI 正在筛选候选视频'
-  if (s === 'extract_audio_url') return '正在提取音频链接'
-  if (s === 'download_audio') return '正在下载音频'
+  if (s === 'extract_audio_url') return '正在准备音频素材'
+  if (s === 'download_audio') return '正在准备音频素材'
   if (s === 'convert_mp3') return '正在转换音频格式'
   if (s === 'demucs') return '正在分离人声'
   if (s === 'transcribe') return '正在语音转文字'
@@ -578,6 +578,12 @@ function shortenUrl(text: string) {
 function humanizeLogMessage(message: string) {
   let m = (message || '').trim()
   if (!m) return '系统处理中...'
+  const low = m.toLowerCase()
+  if (/^run:/i.test(m)) return '正在执行处理步骤'
+  if (/开始下载|下载视频中|下载音频|下载视频|download/i.test(m)) return '正在准备媒体素材'
+  if (/视频下载完成|音频下载完成/i.test(m)) return '媒体素材准备完成'
+  if (/(\/app\/|\.m4s\b|\.mp3\b|\.mp4\b|\.wav\b|\.jpg\b|\.png\b)/i.test(m)) return '正在处理媒体素材'
+  if (/https?:\/\//i.test(m) || low.includes('链接')) return '正在处理媒体资源信息'
   m = shortenUrl(m)
   m = m
     .replace(/^任务已创建\s*\(queued\)/, '任务已创建，正在排队准备执行')
@@ -597,7 +603,7 @@ function humanizeLogMessage(message: string) {
     .replace(/^笔记已写入/i, '笔记已保存到本地')
     .replace(/^已清理中间音频文件/i, '中间音频文件已清理（节省空间）')
     .replace(/^转写文本长度[:：]?\s*(\d+)\s*字符/i, '语音已转文字（约 $1 字）')
-    .replace(/^已获取音频主链接/i, '已获取音频下载链接')
+    .replace(/^已获取音频主链接/i, '已获取媒体资源信息')
     .replace(/\bwaiting_user_pick\b/gi, '等待选择视频')
     .replace(/\bqueue_waiting_children\b/gi, '已入队等待逐个处理')
     .replace(/\bqueue_waiting\b/gi, '队列等待中')
