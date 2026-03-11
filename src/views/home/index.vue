@@ -801,6 +801,7 @@ import {
   uploadChatImageApi,
 } from '@/api/chat'
 import { buildJobNoteDownloadUrl, getAdminJobPushLogsApi, getJobNoteApi, getJobNoteLinkApi } from '@/api/jobs'
+import { buildApiUrl, getAuthToken } from '@/api/client'
 import type { ChatImageAttachment, ChatMessage, ChatModelItem, ChatQuoteReference, JobCreateResponse, TopicQueueBatchSummary, TopicSelectedVideo } from '@/api/types'
 import MarkdownContent from '@/components/MarkdownContent.vue'
 
@@ -2407,7 +2408,10 @@ function videoPlayableUrl(video: TopicSelectedVideo) {
   const { playUrl } = candidateVideoUrls(video)
   if (!/^https?:\/\//i.test(playUrl)) return ''
   // 抖音 CDN 直链需经后端代理才能播放（浏览器直接请求会 403）
-  return `/douyin/proxy-video?url=${encodeURIComponent(playUrl)}`
+  const token = String(getAuthToken() || '').trim()
+  const qs = new URLSearchParams({ url: playUrl })
+  if (token) qs.set('token', token)
+  return buildApiUrl(`/douyin/proxy-video?${qs.toString()}`)
 }
 
 function videoEmbedUrl(video: TopicSelectedVideo) {

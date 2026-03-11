@@ -391,6 +391,11 @@ export const useJobsStore = defineStore('jobs', {
               })
               .catch(() => {
                 if (this._manualClosed[jobId]) return
+                // waiting_user_pick 场景下拉快照失败也不要疯狂重连，避免界面抖动。
+                if (isAwaitingPick) {
+                  jobUi.sseStatus = 'disconnected'
+                  return
+                }
                 jobUi.sseStatus = 'connecting'
                 this._scheduleReconnect(jobId)
               })
@@ -404,22 +409,7 @@ export const useJobsStore = defineStore('jobs', {
             return
           }
           jobUi.sseStatus = 'connecting'
-          void this.fetchJob(jobId)
-            .then((snap) => {
-              if (this._manualClosed[jobId]) return
-              const nextStatus = String(snap?.status || '')
-              if (this._isTerminalStatus(nextStatus) || nextStatus === 'waiting_user_pick') {
-                jobUi.sseStatus = 'disconnected'
-                return
-              }
-              jobUi.sseStatus = 'connecting'
-              this._scheduleReconnect(jobId)
-            })
-            .catch(() => {
-              if (this._manualClosed[jobId]) return
-              jobUi.sseStatus = 'connecting'
-              this._scheduleReconnect(jobId)
-            })
+          this._scheduleReconnect(jobId)
         },
       })
       this._streamMap[jobId] = { close: () => ws.close() }
