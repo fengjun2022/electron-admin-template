@@ -253,7 +253,24 @@
                           >
                             <!-- Thumbnail / Inline Player -->
                             <div class="rounded-lg overflow-hidden ai-candidate-cover mb-2">
-                              <template v-if="activeVideoPreviewKey(msg.task.job_id) === videoPreviewKey(video) && videoEmbedUrl(video)">
+                              <template v-if="activeVideoPreviewKey(msg.task.job_id) === videoPreviewKey(video) && videoPlayableUrl(video)">
+                                <video
+                                  :src="videoPlayableUrl(video) || undefined"
+                                  class="w-full aspect-video bg-black"
+                                  controls
+                                  playsinline
+                                  preload="metadata"
+                                />
+                                <button
+                                  type="button"
+                                  class="ai-candidate-cover__collapse"
+                                  title="收起播放"
+                                  @click.stop="toggleVideoPreview(msg.task.job_id, video)"
+                                >
+                                  收起
+                                </button>
+                              </template>
+                              <template v-else-if="activeVideoPreviewKey(msg.task.job_id) === videoPreviewKey(video) && videoEmbedUrl(video)">
                                 <iframe
                                   :src="videoEmbedUrl(video) || undefined"
                                   class="w-full aspect-video bg-black"
@@ -288,7 +305,7 @@
                                   暂无封面
                                 </div>
                                 <div
-                                  v-if="videoEmbedUrl(video)"
+                                  v-if="videoEmbedUrl(video) || videoPlayableUrl(video)"
                                   class="ai-candidate-cover__overlay"
                                 >
                                   <span class="ai-candidate-cover__play" title="播放视频">
@@ -328,6 +345,14 @@
 
                             <div class="mt-2 flex items-center justify-end">
                               <n-space size="small">
+                                <n-button
+                                  size="tiny"
+                                  secondary
+                                  @click="openVideoUrl(video)"
+                                  :disabled="!canOpenVideoUrl(video)"
+                                >
+                                  打开原视频
+                                </n-button>
                                 <n-button
                                   size="tiny"
                                   type="primary"
@@ -2341,11 +2366,35 @@ function pagedJobVideoCandidates(jobId: string) {
 }
 
 function videoPreviewKey(video: TopicSelectedVideo) {
-  return String(video.url || video.title || '').trim()
+  const { pageUrl, rawUrl } = candidateVideoUrls(video)
+  return String(pageUrl || rawUrl || video.title || '').trim()
 }
 
 function activeVideoPreviewKey(jobId: string) {
   return String(videoPreviewState.value[jobId] || '')
+}
+
+function candidateVideoUrls(video: TopicSelectedVideo) {
+  const rawUrl = String(video.url || '').trim()
+  let pageUrl = String((video as any).page_url || '').trim()
+  let playUrl = String((video as any).play_url || '').trim()
+  if (rawUrl.includes('|||')) {
+    const parts = rawUrl.split('|||', 2)
+    if (!pageUrl) pageUrl = String(parts[0] || '').trim()
+    if (!playUrl) playUrl = String(parts[1] || '').trim()
+  } else {
+    if (!pageUrl && /^https?:\/\//i.test(rawUrl)) pageUrl = rawUrl
+    if (!playUrl && /^https?:\/\/.+\.(mp4|m3u8)(\?|$)/i.test(rawUrl)) playUrl = rawUrl
+  }
+  return { rawUrl, pageUrl, playUrl }
+}
+
+function isDouyinCandidate(video: TopicSelectedVideo) {
+  const platform = String((video as any).platform || '').trim().toLowerCase()
+  if (platform === 'douyin') return true
+  const { pageUrl, rawUrl } = candidateVideoUrls(video)
+  const probe = `${pageUrl} ${rawUrl}`.toLowerCase()
+  return probe.includes('douyin.com') || probe.includes('v.douyin.com')
 }
 
 function extractBvid(text: string) {
@@ -2353,7 +2402,14 @@ function extractBvid(text: string) {
   return m ? m[0] : ''
 }
 
+function videoPlayableUrl(video: TopicSelectedVideo) {
+  if (!isDouyinCandidate(video)) return ''
+  const { playUrl } = candidateVideoUrls(video)
+  return /^https?:\/\//i.test(playUrl) ? playUrl : ''
+}
+
 function videoEmbedUrl(video: TopicSelectedVideo) {
+  if (isDouyinCandidate(video)) return ''
   const bvid = extractBvid(String(video.url || '')) || extractBvid(String(video.title || ''))
   if (!bvid) return ''
   return `https://player.bilibili.com/player.html?bvid=${encodeURIComponent(bvid)}&page=1`
@@ -2371,7 +2427,7 @@ function toggleVideoPreview(jobId: string, video: TopicSelectedVideo) {
 }
 
 function handleCandidateCoverClick(jobId: string, video: TopicSelectedVideo) {
-  if (videoEmbedUrl(video)) {
+  if (videoEmbedUrl(video) || videoPlayableUrl(video)) {
     toggleVideoPreview(jobId, video)
     return
   }
@@ -2379,9 +2435,16 @@ function handleCandidateCoverClick(jobId: string, video: TopicSelectedVideo) {
 }
 
 function openVideoUrl(video: TopicSelectedVideo) {
-  const url = String(video.url || '').trim()
+  const { pageUrl, rawUrl } = candidateVideoUrls(video)
+  const url = String(pageUrl || rawUrl || '').trim()
   if (!url) return
   if (typeof window !== 'undefined') window.open(url, '_blank', 'noopener,noreferrer')
+}
+
+function canOpenVideoUrl(video: TopicSelectedVideo) {
+  const { pageUrl, rawUrl } = candidateVideoUrls(video)
+  const url = String(pageUrl || rawUrl || '').trim()
+  return /^https?:\/\//i.test(url)
 }
 
 function knowledgeHitKey(hit: Record<string, any>, idx: number) {

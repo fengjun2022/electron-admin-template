@@ -309,6 +309,11 @@ export const useJobsStore = defineStore('jobs', {
         },
         onEvent: (type, data) => {
           this._applyRealtimeEvent(jobId, type, data)
+          // 服务端可能在推送 waiting_user_pick 后立刻主动关闭 WS；
+          // 这里补一次快照拉取，避免前端错过最终候选数据。
+          if (type === 'waiting_user_pick') {
+            void this.fetchJob(jobId).catch(() => undefined)
+          }
         },
         onCompleted: async (data) => {
           jobUi.sseStatus = 'disconnected'
@@ -368,11 +373,30 @@ export const useJobsStore = defineStore('jobs', {
           }
           const closeCode = Number(ev?.code || 0)
           const closeReason = String(ev?.reason || '')
-          // 后端主动释放连接：空闲超时 / 等待用户选择 / 连接数上限，不自动重连，避免无意义占用资源。
-          if (closeCode === 4002 || closeCode === 4003 || closeCode === 4429
-            || closeCode === 4404
-            || closeReason.includes('idle_timeout')
-            || closeReason.includes('awaiting_user_pick')
+          const isAwaitingPick = closeCode === 4003 || closeReason.includes('awaiting_user_pick')
+          const isIdleTimeout = closeCode === 4002 || closeReason.includes('idle_timeout')
+          // 后端在等待选择/空闲时会主动断开连接。
+          // 先拉一次最新快照，保证界面能马上拿到 selected_videos；
+          // 若任务仍在 running/queued，再自动重连继续追踪进度。
+          if (isAwaitingPick || isIdleTimeout) {
+            jobUi.sseStatus = 'disconnected'
+            void this.fetchJob(jobId)
+              .then((snap) => {
+                if (this._manualClosed[jobId]) return
+                const nextStatus = String(snap?.status || '')
+                if (nextStatus === 'running' || nextStatus === 'queued') {
+                  jobUi.sseStatus = 'connecting'
+                  this._scheduleReconnect(jobId)
+                }
+              })
+              .catch(() => {
+                if (this._manualClosed[jobId]) return
+                jobUi.sseStatus = 'connecting'
+                this._scheduleReconnect(jobId)
+              })
+            return
+          }
+          if (closeCode === 4429 || closeCode === 4404
             || closeReason.includes('too many connections')
             || closeReason.includes('job not found')
             || closeReason.includes('job_terminal')) {
