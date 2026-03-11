@@ -394,6 +394,15 @@
                     >
                       B站检索
                     </button>
+                    <button
+                      type="button"
+                      class="search-mode-chip"
+                      :class="{ 'search-mode-chip--active': retrievalModeDouyin }"
+                      :disabled="!knowledgeRetrievalEnabled"
+                      @click="retrievalModeDouyin = !retrievalModeDouyin"
+                    >
+                      抖音检索
+                    </button>
 
                   </div>
                 </div>
@@ -828,6 +837,7 @@ const isMacLikePlatform = ref(false)
 const knowledgeRetrievalEnabled = ref(false)
 const retrievalModeNetwork = ref(true)
 const retrievalModeBili = ref(false)
+const retrievalModeDouyin = ref(false)
 const chatSessionUuid = ref('')
 const chatModels = ref<ChatModelItem[]>([])
 const selectedModel = ref<string | null>(null)
@@ -922,6 +932,7 @@ const selectedSearchModes = computed(() => {
   const modes: string[] = []
   if (retrievalModeNetwork.value) modes.push('network')
   if (retrievalModeBili.value) modes.push('bili')
+  if (retrievalModeDouyin.value) modes.push('douyin')
   return modes
 })
 
@@ -1472,6 +1483,7 @@ function toggleKnowledgeRetrieval() {
   if (next) {
     retrievalModeNetwork.value = true
     retrievalModeBili.value = false
+    retrievalModeDouyin.value = false
   }
 }
 
@@ -1625,6 +1637,7 @@ function startNewConversation() {
   knowledgeRetrievalEnabled.value = false
   retrievalModeNetwork.value = true
   retrievalModeBili.value = false
+  retrievalModeDouyin.value = false
   taskRailOpen.value = false
   activeSearchTaskLogs.value = []
   videoPreviewState.value = {}
@@ -1737,6 +1750,7 @@ async function loadSessionFromRoute(sessionUuidFromRoute: string) {
       const modes = ((latestAssistantWithModes.meta as any)?.search_modes as string[]).map((x) => String(x || '').toLowerCase())
       retrievalModeNetwork.value = modes.includes('network')
       retrievalModeBili.value = modes.includes('bili')
+      retrievalModeDouyin.value = modes.includes('douyin')
     }
 
     if (latestTaskJobId) {
@@ -1863,7 +1877,7 @@ async function sendMessage() {
     return
   }
   if (knowledgeRetrievalEnabled.value && !hasRichContext && !selectedSearchModes.value.length) {
-    message.warning('请至少勾选一个检索方式（联网检索 / B站检索）')
+    message.warning('请至少勾选一个检索方式（联网检索 / B站检索 / 抖音检索）')
     return
   }
 
@@ -2000,6 +2014,7 @@ async function sendMessage() {
             const modes = (meta.search_modes as string[]).map((x) => String(x || '').toLowerCase())
             retrievalModeNetwork.value = modes.includes('network')
             retrievalModeBili.value = modes.includes('bili')
+            retrievalModeDouyin.value = modes.includes('douyin')
           }
           backendSearchDispatchEnabled = Boolean((meta as any)?.search_dispatch?.enabled)
           if (backendSearchDispatchEnabled) {
@@ -2103,6 +2118,9 @@ async function sendMessage() {
             const sources = Array.isArray((result as any)?.sources) ? ((result as any)?.sources as any[]) : []
             for (const row of sources) appendSearchTaskLog(row || {})
           } else if (mode === 'bili') {
+            const cands = Array.isArray((result as any)?.candidates) ? ((result as any)?.candidates as any[]) : []
+            for (const row of cands) appendSearchTaskLog(row || {})
+          } else if (mode === 'douyin') {
             const cands = Array.isArray((result as any)?.candidates) ? ((result as any)?.candidates as any[]) : []
             for (const row of cands) appendSearchTaskLog(row || {})
           }
