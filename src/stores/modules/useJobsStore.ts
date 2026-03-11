@@ -404,7 +404,22 @@ export const useJobsStore = defineStore('jobs', {
             return
           }
           jobUi.sseStatus = 'connecting'
-          this._scheduleReconnect(jobId)
+          void this.fetchJob(jobId)
+            .then((snap) => {
+              if (this._manualClosed[jobId]) return
+              const nextStatus = String(snap?.status || '')
+              if (this._isTerminalStatus(nextStatus) || nextStatus === 'waiting_user_pick') {
+                jobUi.sseStatus = 'disconnected'
+                return
+              }
+              jobUi.sseStatus = 'connecting'
+              this._scheduleReconnect(jobId)
+            })
+            .catch(() => {
+              if (this._manualClosed[jobId]) return
+              jobUi.sseStatus = 'connecting'
+              this._scheduleReconnect(jobId)
+            })
         },
       })
       this._streamMap[jobId] = { close: () => ws.close() }

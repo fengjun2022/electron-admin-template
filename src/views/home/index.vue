@@ -2405,7 +2405,9 @@ function extractBvid(text: string) {
 function videoPlayableUrl(video: TopicSelectedVideo) {
   if (!isDouyinCandidate(video)) return ''
   const { playUrl } = candidateVideoUrls(video)
-  return /^https?:\/\//i.test(playUrl) ? playUrl : ''
+  if (!/^https?:\/\//i.test(playUrl)) return ''
+  // 抖音 CDN 直链需经后端代理才能播放（浏览器直接请求会 403）
+  return `/douyin/proxy-video?url=${encodeURIComponent(playUrl)}`
 }
 
 function videoEmbedUrl(video: TopicSelectedVideo) {
