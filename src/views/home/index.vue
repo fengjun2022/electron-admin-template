@@ -2405,11 +2405,14 @@ function extractBvid(text: string) {
 
 function videoPlayableUrl(video: TopicSelectedVideo) {
   if (!isDouyinCandidate(video)) return ''
-  const { playUrl } = candidateVideoUrls(video)
+  const { playUrl, pageUrl } = candidateVideoUrls(video)
   if (!/^https?:\/\//i.test(playUrl)) return ''
   // 抖音 CDN 直链需经后端代理才能播放（浏览器直接请求会 403）
   const token = String(getAuthToken() || '').trim()
   const qs = new URLSearchParams({ url: playUrl })
+  if (pageUrl) qs.set('page_url', pageUrl)
+  const awemeId = String((video as any).aweme_id || '').trim()
+  if (awemeId) qs.set('aweme_id', awemeId)
   if (token) qs.set('token', token)
   return buildApiUrl(`/douyin/proxy-video?${qs.toString()}`)
 }

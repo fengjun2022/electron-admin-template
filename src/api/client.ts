@@ -2,27 +2,12 @@ const DEFAULT_API_BASE_URL = 'http://47.101.128.4:2002/robt'
 const API_BASE_URL_STORAGE_KEY = 'robot_web_api_base_url'
 const AUTH_TOKEN_STORAGE_KEY = 'robot_web_auth_token'
 
-function detectDefaultApiBaseUrl(): string {
-  if (typeof window !== 'undefined') {
-    const host = String(window.location.hostname || '').trim().toLowerCase()
-    if (host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0') {
-      return 'http://127.0.0.1:8080'
-    }
-  }
-  return DEFAULT_API_BASE_URL
-}
-
 export function getApiBaseUrl(): string {
-  const fromStorageRaw = typeof window !== 'undefined'
+  const fromStorage = typeof window !== 'undefined'
     ? localStorage.getItem(API_BASE_URL_STORAGE_KEY)
     : null
-  const fromStorage = (fromStorageRaw || '').trim().replace(/\/+$/, '')
   const fromEnv = import.meta.env.VITE_API_BASE_URL as string | undefined
-  const autoDefault = detectDefaultApiBaseUrl()
-  const isLocalHost = autoDefault === 'http://127.0.0.1:8080'
-  // 兼容历史版本：若本地开发环境仍残留“远端默认地址”，自动切回本地后端。
-  const useStorage = Boolean(fromStorage) && !(isLocalHost && fromStorage === DEFAULT_API_BASE_URL)
-  return ((useStorage ? fromStorage : '') || fromEnv || autoDefault).replace(/\/+$/, '')
+  return (fromStorage || fromEnv || DEFAULT_API_BASE_URL).replace(/\/+$/, '')
 }
 
 export function setApiBaseUrl(url: string): void {
