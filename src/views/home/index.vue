@@ -259,7 +259,7 @@
                                   class="w-full aspect-video bg-black"
                                   controls
                                   playsinline
-                                  preload="metadata"
+                                  preload="auto"
                                 />
                                 <button
                                   type="button"
@@ -915,6 +915,12 @@ const sessionMessageCache = ref<Record<string, UiChatMessage[]>>({})
 let searchTaskPollTimer: number | null = null
 let messagesScrollFrame: number | null = null
 let lastResumeSyncAt = 0
+let searchTaskPollFailureCount = 0
+let searchTaskPollPausedUntil = 0
+
+const SEARCH_TASK_POLL_INTERVAL_MS = 8000
+const SEARCH_TASK_POLL_MAX_FAILURES = 3
+const SEARCH_TASK_POLL_PAUSE_MS = 60_000
 
 const currentSseButtonText = computed(() => {
   const s = currentJobState.value?.sseStatus
@@ -1454,6 +1460,11 @@ function pickUrlFromLogRow(row: any) {
 async function refreshActiveSearchTaskLogs() {
   if (!knowledgeRetrievalEnabled.value) {
     activeSearchTaskLogs.value = []
+    searchTaskPollFailureCount = 0
+    searchTaskPollPausedUntil = 0
+    return
+  }
+  if (searchTaskPollPausedUntil > Date.now()) {
     return
   }
   try {
@@ -1470,18 +1481,30 @@ async function refreshActiveSearchTaskLogs() {
       }
     }
     activeSearchTaskLogs.value = logs.slice(-240)
-  } catch {
-    // ignore polling errors
+    searchTaskPollFailureCount = 0
+    searchTaskPollPausedUntil = 0
+  } catch (e: any) {
+    searchTaskPollFailureCount += 1
+    if (searchTaskPollFailureCount >= SEARCH_TASK_POLL_MAX_FAILURES) {
+      searchTaskPollPausedUntil = Date.now() + SEARCH_TASK_POLL_PAUSE_MS
+      searchTaskPollFailureCount = 0
+      const ts = new Date().toISOString()
+      const reason = String(e?.message || '服务暂不可用')
+      const line = `搜索任务日志轮询已暂停 60 秒（${reason}）`
+      activeSearchTaskLogs.value = [...activeSearchTaskLogs.value, { ts, message: line }].slice(-240)
+    }
   }
 }
 
 function startSearchTaskPolling() {
   stopSearchTaskPolling()
+  searchTaskPollFailureCount = 0
+  searchTaskPollPausedUntil = 0
   void refreshActiveSearchTaskLogs()
   if (typeof window === 'undefined') return
   searchTaskPollTimer = window.setInterval(() => {
     void refreshActiveSearchTaskLogs()
-  }, 8000)
+  }, SEARCH_TASK_POLL_INTERVAL_MS)
 }
 
 function stopSearchTaskPolling() {
@@ -1611,14 +1634,23 @@ function scheduleResumeSync(forceReconnect = true) {
   void syncCurrentJobRuntime({ forceReconnect, silent: true })
 }
 
+function resumeSearchTaskPollingNow() {
+  if (!knowledgeRetrievalEnabled.value) return
+  searchTaskPollFailureCount = 0
+  searchTaskPollPausedUntil = 0
+  void refreshActiveSearchTaskLogs()
+}
+
 function handleWindowFocus() {
   scheduleResumeSync(true)
+  resumeSearchTaskPollingNow()
 }
 
 function handleDocumentVisibilityChange() {
   if (typeof document === 'undefined') return
   if (document.visibilityState === 'visible') {
     scheduleResumeSync(true)
+    resumeSearchTaskPollingNow()
   }
 }
 
