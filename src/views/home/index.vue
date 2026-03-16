@@ -2122,6 +2122,9 @@ async function sendMessage() {
             shouldHideSearchProgress = true
           }
           if (finalDoneText) {
+            // 终态文本到达时，直接以 done.text 为准，避免 residual delta 再次追加导致整段重复。
+            typewriterBuffer = ''
+            stopTypewriter()
             pendingAssistant.content = finalDoneText
           }
         },
@@ -2409,7 +2412,7 @@ function activeVideoPreviewKey(jobId: string) {
 
 function candidateVideoUrls(video: TopicSelectedVideo) {
   const rawUrl = String(video.url || '').trim()
-  let pageUrl = String((video as any).page_url || '').trim()
+  let pageUrl = String((video as any).page_url || (video as any).canonical_url || (video as any).share_url || '').trim()
   let playUrl = String((video as any).play_url || '').trim()
   if (rawUrl.includes('|||')) {
     const parts = rawUrl.split('|||', 2)
@@ -2427,7 +2430,7 @@ function isDouyinCandidate(video: TopicSelectedVideo) {
   if (platform === 'douyin') return true
   const { pageUrl, rawUrl } = candidateVideoUrls(video)
   const probe = `${pageUrl} ${rawUrl}`.toLowerCase()
-  return probe.includes('douyin.com') || probe.includes('v.douyin.com')
+  return probe.includes('douyin.com') || probe.includes('v.douyin.com') || probe.includes('iesdouyin.com')
 }
 
 function extractBvid(text: string) {
