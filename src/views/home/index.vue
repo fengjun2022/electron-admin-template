@@ -261,58 +261,89 @@
                                   playsinline
                                   preload="auto"
                                 />
-                                <button
-                                  type="button"
-                                  class="ai-candidate-cover__collapse"
-                                  title="收起播放"
-                                  @click.stop="toggleVideoPreview(msg.task.job_id, video)"
-                                >
-                                  收起
-                                </button>
+                                <div class="ai-candidate-cover__actions">
+                                  <button
+                                    type="button"
+                                    class="ai-candidate-cover__action"
+                                    title="全屏预览"
+                                    @click.stop="openCandidateFullscreen(video)"
+                                  >
+                                    全屏
+                                  </button>
+                                  <button
+                                    type="button"
+                                    class="ai-candidate-cover__action"
+                                    title="收起播放"
+                                    @click.stop="toggleVideoPreview(msg.task.job_id, video)"
+                                  >
+                                    收起
+                                  </button>
+                                </div>
                               </template>
                               <template v-else-if="activeVideoPreviewKey(msg.task.job_id) === videoPreviewKey(video) && videoEmbedUrl(video)">
                                 <iframe
                                   :src="videoEmbedUrl(video) || undefined"
                                   class="w-full aspect-video bg-black"
                                   frameborder="0"
+                                  allow="autoplay; fullscreen"
                                   allowfullscreen
                                   scrolling="no"
                                 />
+                                <div class="ai-candidate-cover__actions">
+                                  <button
+                                    type="button"
+                                    class="ai-candidate-cover__action"
+                                    title="全屏预览"
+                                    @click.stop="openCandidateFullscreen(video)"
+                                  >
+                                    全屏
+                                  </button>
+                                  <button
+                                    type="button"
+                                    class="ai-candidate-cover__action"
+                                    title="收起播放"
+                                    @click.stop="toggleVideoPreview(msg.task.job_id, video)"
+                                  >
+                                    收起
+                                  </button>
+                                </div>
+                              </template>
+                              <template v-else>
                                 <button
                                   type="button"
-                                  class="ai-candidate-cover__collapse"
-                                  title="收起播放"
-                                  @click.stop="toggleVideoPreview(msg.task.job_id, video)"
+                                  class="ai-candidate-cover__trigger"
+                                  @click="handleCandidateCoverClick(msg.task.job_id, video)"
                                 >
-                                  收起
+                                  <img
+                                    v-if="videoCoverUrl(video)"
+                                    :src="videoCoverUrl(video) || undefined"
+                                    alt="视频封面"
+                                    class="w-full aspect-video object-cover"
+                                    loading="lazy"
+                                    referrerpolicy="no-referrer"
+                                  />
+                                  <div v-else class="w-full aspect-video flex items-center justify-center text-xs opacity-60">
+                                    暂无封面
+                                  </div>
+                                  <div
+                                    v-if="videoEmbedUrl(video) || videoPlayableUrl(video)"
+                                    class="ai-candidate-cover__overlay"
+                                  >
+                                    <span class="ai-candidate-cover__play" title="播放视频">
+                                      <n-icon :component="Play" size="22" />
+                                    </span>
+                                  </div>
+                                </button>
+                                <button
+                                  v-if="videoEmbedUrl(video) || videoPlayableUrl(video)"
+                                  type="button"
+                                  class="ai-candidate-cover__fullscreen"
+                                  title="全屏预览"
+                                  @click.stop="openCandidateFullscreen(video)"
+                                >
+                                  全屏
                                 </button>
                               </template>
-                              <button
-                                v-else
-                                type="button"
-                                class="ai-candidate-cover__trigger"
-                                @click="handleCandidateCoverClick(msg.task.job_id, video)"
-                              >
-                                <img
-                                  v-if="videoCoverUrl(video)"
-                                  :src="videoCoverUrl(video) || undefined"
-                                  alt="视频封面"
-                                  class="w-full aspect-video object-cover"
-                                  loading="lazy"
-                                  referrerpolicy="no-referrer"
-                                />
-                                <div v-else class="w-full aspect-video flex items-center justify-center text-xs opacity-60">
-                                  暂无封面
-                                </div>
-                                <div
-                                  v-if="videoEmbedUrl(video) || videoPlayableUrl(video)"
-                                  class="ai-candidate-cover__overlay"
-                                >
-                                  <span class="ai-candidate-cover__play" title="播放视频">
-                                    <n-icon :component="Play" size="22" />
-                                  </span>
-                                </div>
-                              </button>
                             </div>
 
                             <!-- Content -->
@@ -352,6 +383,14 @@
                                   :disabled="!canOpenVideoUrl(video)"
                                 >
                                   打开原视频
+                                </n-button>
+                                <n-button
+                                  size="tiny"
+                                  secondary
+                                  @click="openCandidateFullscreen(video)"
+                                  :disabled="!canPreviewCandidate(video)"
+                                >
+                                  全屏预览
                                 </n-button>
                                 <n-button
                                   size="tiny"
@@ -774,6 +813,46 @@
         </div>
       </div>
     </div>
+    <div
+      v-if="candidateFullscreenPreview.visible"
+      class="video-preview-layer"
+      @click="closeCandidateFullscreen"
+    >
+      <button type="button" class="video-preview-layer__close" @click.stop="closeCandidateFullscreen">×</button>
+      <div class="video-preview-layer__body" @click.stop>
+        <div class="video-preview-layer__header">
+          <div class="video-preview-layer__title">
+            {{ candidateFullscreenPreview.title || '视频预览' }}
+          </div>
+          <button
+            v-if="candidateFullscreenPreview.pageUrl"
+            type="button"
+            class="video-preview-layer__link"
+            @click.stop="openCandidateFullscreenSource"
+          >
+            打开原视频
+          </button>
+        </div>
+        <video
+          v-if="candidateFullscreenPreview.playableUrl"
+          :src="candidateFullscreenPreview.playableUrl"
+          class="video-preview-layer__player"
+          controls
+          autoplay
+          playsinline
+          preload="auto"
+        />
+        <iframe
+          v-else-if="candidateFullscreenPreview.embedUrl"
+          :src="candidateFullscreenPreview.embedUrl"
+          class="video-preview-layer__player"
+          frameborder="0"
+          allow="autoplay; fullscreen"
+          allowfullscreen
+          scrolling="no"
+        />
+      </div>
+    </div>
   </div>
 </template>
 
@@ -892,6 +971,13 @@ const imagePreview = ref({
   visible: false,
   url: '',
   label: '',
+})
+const candidateFullscreenPreview = ref({
+  visible: false,
+  title: '',
+  playableUrl: '',
+  embedUrl: '',
+  pageUrl: '',
 })
 
 const currentJobState = computed(() => (jobsStore.currentJobId ? jobsStore.jobs[jobsStore.currentJobId] : null))
@@ -1217,6 +1303,7 @@ function handleGlobalKeydown(event: KeyboardEvent) {
   if (event.key !== 'Escape') return
   closeQuoteContextMenu()
   closeImagePreview()
+  closeCandidateFullscreen()
 }
 
 function openImagePreview(url: string, label = '') {
@@ -1231,6 +1318,16 @@ function openImagePreview(url: string, label = '') {
 
 function closeImagePreview() {
   imagePreview.value.visible = false
+}
+
+function closeCandidateFullscreen() {
+  candidateFullscreenPreview.value = {
+    visible: false,
+    title: '',
+    playableUrl: '',
+    embedUrl: '',
+    pageUrl: '',
+  }
 }
 
 function clearComposerQuote() {
@@ -1699,6 +1796,7 @@ function startNewConversation() {
   taskRailOpen.value = false
   activeSearchTaskLogs.value = []
   videoPreviewState.value = {}
+  closeCandidateFullscreen()
   candidateSelectionState.value = {}
   batchSelectingJobs.value = {}
   candidatePageState.value = {}
@@ -2459,6 +2557,10 @@ function videoEmbedUrl(video: TopicSelectedVideo) {
   return `https://player.bilibili.com/player.html?bvid=${encodeURIComponent(bvid)}&page=1`
 }
 
+function canPreviewCandidate(video: TopicSelectedVideo) {
+  return Boolean(videoPlayableUrl(video) || videoEmbedUrl(video))
+}
+
 function toggleVideoPreview(jobId: string, video: TopicSelectedVideo) {
   const key = videoPreviewKey(video)
   if (!key) return
@@ -2471,11 +2573,34 @@ function toggleVideoPreview(jobId: string, video: TopicSelectedVideo) {
 }
 
 function handleCandidateCoverClick(jobId: string, video: TopicSelectedVideo) {
-  if (videoEmbedUrl(video) || videoPlayableUrl(video)) {
+  if (canPreviewCandidate(video)) {
     toggleVideoPreview(jobId, video)
     return
   }
   openVideoUrl(video)
+}
+
+function openCandidateFullscreen(video: TopicSelectedVideo) {
+  const playableUrl = videoPlayableUrl(video)
+  const embedUrl = videoEmbedUrl(video)
+  if (!playableUrl && !embedUrl) {
+    openVideoUrl(video)
+    return
+  }
+  const { pageUrl, rawUrl } = candidateVideoUrls(video)
+  candidateFullscreenPreview.value = {
+    visible: true,
+    title: String(video.title || '').trim(),
+    playableUrl,
+    embedUrl,
+    pageUrl: String(pageUrl || rawUrl || '').trim(),
+  }
+}
+
+function openCandidateFullscreenSource() {
+  const url = String(candidateFullscreenPreview.value.pageUrl || '').trim()
+  if (!url) return
+  if (typeof window !== 'undefined') window.open(url, '_blank', 'noopener,noreferrer')
 }
 
 function openVideoUrl(video: TopicSelectedVideo) {
@@ -3080,6 +3205,76 @@ function humanizeSidebarLog(text: string) {
   text-shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
 }
 
+.video-preview-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 1350;
+  background: rgba(2, 6, 23, 0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 28px;
+}
+
+.video-preview-layer__body {
+  width: min(94vw, 1440px);
+  max-height: 94vh;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.video-preview-layer__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  color: rgba(248, 250, 252, 0.96);
+}
+
+.video-preview-layer__title {
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.video-preview-layer__link {
+  flex: none;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  border-radius: 999px;
+  padding: 8px 14px;
+  background: rgba(15, 23, 42, 0.72);
+  color: rgba(248, 250, 252, 0.96);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.video-preview-layer__player {
+  width: 100%;
+  height: min(78vh, 980px);
+  border: 0;
+  border-radius: 20px;
+  background: #000;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.35);
+}
+
+.video-preview-layer__close {
+  position: absolute;
+  top: 16px;
+  right: 18px;
+  border: 0;
+  background: transparent;
+  color: #fff;
+  font-size: 34px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
+}
+
 .composer-image-chip {
   position: relative;
   width: 72px;
@@ -3207,6 +3402,16 @@ function humanizeSidebarLog(text: string) {
 
 :global(.dark) .image-preview-layer__close {
   color: rgba(248, 250, 252, 0.96);
+}
+
+:global(.dark) .video-preview-layer__close {
+  color: rgba(248, 250, 252, 0.96);
+}
+
+:global(.dark) .video-preview-layer__link {
+  border-color: rgba(148, 163, 184, 0.32);
+  background: rgba(15, 23, 42, 0.82);
+  color: rgba(241, 245, 249, 0.96);
 }
 
 :global(.dark) .composer-image-chip {
@@ -3939,11 +4144,18 @@ function humanizeSidebarLog(text: string) {
   cursor: pointer;
 }
 
-.ai-candidate-cover__collapse {
+.ai-candidate-cover__actions {
   position: absolute;
   top: 8px;
   right: 8px;
   z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ai-candidate-cover__action,
+.ai-candidate-cover__fullscreen {
   border: 0;
   border-radius: 999px;
   padding: 4px 10px;
@@ -3952,6 +4164,13 @@ function humanizeSidebarLog(text: string) {
   color: #f8fafc;
   background: rgba(15, 23, 42, 0.72);
   cursor: pointer;
+}
+
+.ai-candidate-cover__fullscreen {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
 }
 
 .ai-candidate-cover__overlay {
