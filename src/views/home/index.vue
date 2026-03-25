@@ -162,6 +162,169 @@
                       </n-button>
                     </div>
 
+                    <div v-if="msg.role === 'assistant' && (msg.agentWorkflow || msg.agentWorkflowStateKey)" class="mt-3 px-1">
+                      <div class="rounded-2xl p-3 knowledge-hit-panel">
+                        <div class="flex items-center justify-between gap-2 mb-2">
+                          <div class="text-xs knowledge-hit-panel__title">Agent 任务链</div>
+                          <n-tag v-if="msg.agentWorkflow" size="small" type="info">
+                            {{ workflowStatusLabel(msg.agentWorkflow?.master_plan?.workflow_status) }}
+                          </n-tag>
+                        </div>
+                        <div v-if="workflowCurrentStage(msg.agentWorkflow)" class="text-xs opacity-70 mb-2">
+                          当前阶段：{{ workflowCurrentStage(msg.agentWorkflow) }}
+                        </div>
+                        <div v-if="workflowDecisionText(msg.agentWorkflow)" class="text-xs mb-3">
+                          主决策：{{ workflowDecisionText(msg.agentWorkflow) }}
+                        </div>
+                        <div class="space-y-2">
+                          <div
+                            v-for="task in workflowTaskPreview(msg.agentWorkflow)"
+                            :key="task.task_id"
+                            class="rounded-xl p-2 knowledge-hit-card"
+                          >
+                            <div class="flex items-center justify-between gap-3">
+                              <div class="min-w-0 flex-1">
+                                <div class="text-xs font-medium break-words">{{ task.task_name || task.task_id }}</div>
+                                <div class="text-[11px] opacity-70 break-words">{{ task.summary_for_ui || task.task_goal || '等待执行' }}</div>
+                              </div>
+                              <n-tag size="tiny" :type="String(task.status || '') === 'completed' ? 'success' : String(task.status || '') === 'failed' ? 'error' : 'default'">
+                                {{ workflowStatusLabel(task.status) }}
+                              </n-tag>
+                            </div>
+                          </div>
+                        </div>
+                        <div v-if="workflowRecentTrace(msg.agentWorkflow).length" class="mt-3">
+                          <div class="text-xs opacity-70 mb-1">最近执行</div>
+                          <div class="space-y-1">
+                            <div
+                              v-for="trace in workflowRecentTrace(msg.agentWorkflow)"
+                              :key="`${trace.task_id}-${trace.ts || ''}`"
+                              class="text-[11px] leading-5 break-words"
+                            >
+                              <span class="font-medium">{{ trace.task_id }}</span>
+                              <span class="opacity-70"> · {{ trace.compressed_result?.key_result || trace.compressed_result?.what_was_done || workflowStatusLabel(trace.status) }}</span>
+                            </div>
+                          </div>
+                        </div>
+                        <div v-if="workflowResourceGroups(msg.agentWorkflow).length" class="mt-3">
+                          <div class="text-xs opacity-70 mb-1">推荐资源</div>
+                          <div
+                            v-for="group in workflowResourceGroups(msg.agentWorkflow)"
+                            :key="group.label"
+                            class="mb-2"
+                          >
+                            <div class="text-[11px] font-medium mb-1">{{ group.label }}</div>
+                            <div
+                              v-for="item in group.items.slice(0, 3)"
+                              :key="`${group.label}-${item.url || item.resource_title}`"
+                              class="text-[11px] leading-5 break-words"
+                            >
+                              <a
+                                v-if="item.url"
+                                :href="String(item.url)"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                class="underline"
+                              >
+                                {{ item.resource_title || item.url }}
+                              </a>
+                              <span v-else>{{ item.resource_title }}</span>
+                            </div>
+                          </div>
+                        </div>
+                        <div v-if="msg.agentWorkflowStateKey" class="mt-3 flex justify-end">
+                          <n-button
+                            size="tiny"
+                            quaternary
+                            type="primary"
+                            :loading="workflowReplayLoading('chat', msg.agentWorkflowStateKey)"
+                            @click="toggleMessageWorkflowReplay(msg)"
+                          >
+                            {{ workflowReplayOpen('chat', msg.agentWorkflowStateKey) ? '收起完整回放' : '回放完整任务链' }}
+                          </n-button>
+                        </div>
+                        <div v-if="msg.agentWorkflowStateKey && workflowReplayOpen('chat', msg.agentWorkflowStateKey)" class="mt-3">
+                          <n-spin :show="workflowReplayLoading('chat', msg.agentWorkflowStateKey)">
+                            <div
+                              v-if="workflowReplayRecord('chat', msg.agentWorkflowStateKey)"
+                              class="rounded-xl border border-slate-200/70 p-3 bg-white/70 space-y-3"
+                            >
+                              <div class="text-[11px] opacity-70 break-words">
+                                记录键：{{ workflowReplayRecord('chat', msg.agentWorkflowStateKey)?.state_key }}
+                              </div>
+                              <div class="grid grid-cols-1 gap-1 text-[11px] opacity-80">
+                                <div v-if="workflowReplayRecord('chat', msg.agentWorkflowStateKey)?.updated_at">
+                                  更新时间：{{ workflowReplayRecord('chat', msg.agentWorkflowStateKey)?.updated_at }}
+                                </div>
+                                <div v-if="workflowReplayRecord('chat', msg.agentWorkflowStateKey)?.finished_at">
+                                  结束时间：{{ workflowReplayRecord('chat', msg.agentWorkflowStateKey)?.finished_at }}
+                                </div>
+                              </div>
+                              <div v-if="workflowReplayArtifactsPreview(workflowReplayRecord('chat', msg.agentWorkflowStateKey)).length">
+                                <div class="text-xs opacity-70 mb-1">运行态摘要</div>
+                                <div
+                                  v-for="row in workflowReplayArtifactsPreview(workflowReplayRecord('chat', msg.agentWorkflowStateKey))"
+                                  :key="`${msg.localId}-${row.label}`"
+                                  class="text-[11px] leading-5 break-words"
+                                >
+                                  <span class="font-medium">{{ row.label }}：</span>{{ row.value }}
+                                </div>
+                              </div>
+                              <div>
+                                <div class="text-xs opacity-70 mb-2">完整任务图</div>
+                                <div class="space-y-2 max-h-72 overflow-auto pr-1">
+                                  <div
+                                    v-for="task in workflowAllTasks(workflowReplayRecord('chat', msg.agentWorkflowStateKey)?.workflow)"
+                                    :key="`${msg.localId}-${task.task_id}`"
+                                    class="rounded-xl border border-slate-200/70 px-2 py-2"
+                                  >
+                                    <div class="flex items-center justify-between gap-2">
+                                      <div class="text-xs font-medium break-words">{{ task.task_name || task.task_id }}</div>
+                                      <n-tag size="tiny" :type="String(task.status || '') === 'completed' ? 'success' : String(task.status || '') === 'failed' ? 'error' : 'default'">
+                                        {{ workflowStatusLabel(task.status) }}
+                                      </n-tag>
+                                    </div>
+                                    <div class="text-[11px] opacity-70 mt-1 break-words">
+                                      {{ task.summary_for_ui || task.task_goal || '等待执行' }}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                              <div v-if="workflowAllTraces(workflowReplayRecord('chat', msg.agentWorkflowStateKey)?.workflow).length">
+                                <div class="text-xs opacity-70 mb-2">完整执行轨迹</div>
+                                <div class="space-y-2 max-h-72 overflow-auto pr-1">
+                                  <div
+                                    v-for="trace in workflowAllTraces(workflowReplayRecord('chat', msg.agentWorkflowStateKey)?.workflow)"
+                                    :key="`${msg.localId}-${trace.task_id}-${trace.ts || ''}`"
+                                    class="rounded-xl border border-slate-200/70 px-2 py-2"
+                                  >
+                                    <div class="text-xs font-medium break-words">{{ trace.task_id }}</div>
+                                    <div class="text-[11px] opacity-70 mt-1 break-words">
+                                      {{ trace.compressed_result?.key_result || trace.compressed_result?.what_was_done || workflowStatusLabel(trace.status) }}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                              <div v-if="workflowAllErrors(workflowReplayRecord('chat', msg.agentWorkflowStateKey)?.workflow).length">
+                                <div class="text-xs opacity-70 mb-2">错误恢复</div>
+                                <div class="space-y-2 max-h-56 overflow-auto pr-1">
+                                  <div
+                                    v-for="row in workflowAllErrors(workflowReplayRecord('chat', msg.agentWorkflowStateKey)?.workflow)"
+                                    :key="`${msg.localId}-${row.task_id || 'err'}-${row.ts || ''}`"
+                                    class="rounded-xl border border-red-200/70 px-2 py-2"
+                                  >
+                                    <div class="text-xs font-medium">{{ row.task_id || '系统错误' }}</div>
+                                    <div class="text-[11px] opacity-80 break-words mt-1">{{ row.error_message || row.error_type || '未知错误' }}</div>
+                                    <div v-if="row.recovery_action" class="text-[11px] opacity-70 mt-1">恢复：{{ row.recovery_action }}</div>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </n-spin>
+                        </div>
+                      </div>
+                    </div>
+
                     <div v-if="msg.role === 'assistant' && (msg.knowledgeHits || []).length" class="mt-3 px-1">
                       <div class="rounded-2xl p-3 knowledge-hit-panel">
                         <div class="flex items-center justify-between gap-2 mb-2">
@@ -685,6 +848,163 @@
                 </div>
               </div>
 
+              <div v-if="currentJobWorkflow || jobsStore.currentJobId" class="rail-section rail-section--plain">
+                <div class="flex items-center justify-between gap-2 mb-2">
+                  <div class="text-xs opacity-70">Agent 工作流</div>
+                  <div class="flex items-center gap-2">
+                    <n-button
+                      v-if="jobsStore.currentJobId"
+                      size="tiny"
+                      quaternary
+                      type="primary"
+                      :loading="workflowReplayLoading('job', jobsStore.currentJobId)"
+                      @click="toggleCurrentJobWorkflowReplay"
+                    >
+                      {{ workflowReplayOpen('job', jobsStore.currentJobId) ? '收起完整回放' : '回放完整任务链' }}
+                    </n-button>
+                    <n-tag size="small" type="info">
+                      {{ workflowStatusLabel(currentJobWorkflow?.master_plan?.workflow_status) }}
+                    </n-tag>
+                  </div>
+                </div>
+                <div class="rail-subpanel p-2 space-y-3">
+                  <div v-if="workflowCurrentStage(currentJobWorkflow)" class="text-xs">
+                    <span class="opacity-60">当前阶段：</span>
+                    <span class="font-medium">{{ workflowCurrentStage(currentJobWorkflow) }}</span>
+                  </div>
+                  <div v-if="workflowDecisionText(currentJobWorkflow)" class="text-xs leading-5 break-words">
+                    <span class="opacity-60">主决策：</span>
+                    <span>{{ workflowDecisionText(currentJobWorkflow) }}</span>
+                  </div>
+                  <div>
+                    <div class="text-xs opacity-70 mb-2">任务图</div>
+                    <div class="space-y-2">
+                      <div
+                        v-for="task in workflowTaskPreview(currentJobWorkflow)"
+                        :key="task.task_id"
+                        class="rounded-xl border border-slate-200/60 px-2 py-2"
+                      >
+                        <div class="flex items-center justify-between gap-2">
+                          <div class="text-xs font-medium break-words">{{ task.task_name || task.task_id }}</div>
+                          <n-tag size="tiny" :type="String(task.status || '') === 'completed' ? 'success' : String(task.status || '') === 'failed' ? 'error' : 'default'">
+                            {{ workflowStatusLabel(task.status) }}
+                          </n-tag>
+                        </div>
+                        <div class="text-[11px] opacity-70 mt-1 break-words">
+                          {{ task.summary_for_ui || task.task_goal || '等待执行' }}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div v-if="workflowRecentTrace(currentJobWorkflow).length">
+                    <div class="text-xs opacity-70 mb-2">最近执行</div>
+                    <div class="space-y-2">
+                      <div
+                        v-for="trace in workflowRecentTrace(currentJobWorkflow)"
+                        :key="`${trace.task_id}-${trace.ts || ''}`"
+                        class="rounded-xl border border-slate-200/60 px-2 py-2"
+                      >
+                        <div class="text-xs font-medium">{{ trace.task_id }}</div>
+                        <div class="text-[11px] opacity-70 break-words mt-1">
+                          {{ trace.compressed_result?.key_result || trace.compressed_result?.what_was_done || workflowStatusLabel(trace.status) }}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div v-if="workflowErrorPreview(currentJobWorkflow).length">
+                    <div class="text-xs opacity-70 mb-2">错误恢复</div>
+                    <div
+                      v-for="row in workflowErrorPreview(currentJobWorkflow)"
+                      :key="`${row.task_id || 'err'}-${row.ts || ''}`"
+                      class="rounded-xl border border-red-200/70 px-2 py-2"
+                    >
+                      <div class="text-xs font-medium">{{ row.task_id || '系统错误' }}</div>
+                      <div class="text-[11px] opacity-80 break-words mt-1">{{ row.error_message || row.error_type || '未知错误' }}</div>
+                      <div v-if="row.recovery_action" class="text-[11px] opacity-70 mt-1">恢复：{{ row.recovery_action }}</div>
+                    </div>
+                  </div>
+                  <div v-if="jobsStore.currentJobId && workflowReplayOpen('job', jobsStore.currentJobId)">
+                    <n-spin :show="workflowReplayLoading('job', jobsStore.currentJobId)">
+                      <div
+                        v-if="workflowReplayRecord('job', jobsStore.currentJobId)"
+                        class="rounded-xl border border-slate-200/70 px-2 py-3 bg-white/70 space-y-3"
+                      >
+                        <div class="text-[11px] opacity-70 break-words">
+                          记录键：{{ workflowReplayRecord('job', jobsStore.currentJobId)?.state_key }}
+                        </div>
+                        <div class="grid grid-cols-1 gap-1 text-[11px] opacity-80">
+                          <div v-if="workflowReplayRecord('job', jobsStore.currentJobId)?.updated_at">
+                            更新时间：{{ workflowReplayRecord('job', jobsStore.currentJobId)?.updated_at }}
+                          </div>
+                          <div v-if="workflowReplayRecord('job', jobsStore.currentJobId)?.finished_at">
+                            结束时间：{{ workflowReplayRecord('job', jobsStore.currentJobId)?.finished_at }}
+                          </div>
+                        </div>
+                        <div v-if="workflowReplayArtifactsPreview(workflowReplayRecord('job', jobsStore.currentJobId)).length">
+                          <div class="text-xs opacity-70 mb-1">运行态摘要</div>
+                          <div
+                            v-for="row in workflowReplayArtifactsPreview(workflowReplayRecord('job', jobsStore.currentJobId))"
+                            :key="`job-${jobsStore.currentJobId}-${row.label}`"
+                            class="text-[11px] leading-5 break-words"
+                          >
+                            <span class="font-medium">{{ row.label }}：</span>{{ row.value }}
+                          </div>
+                        </div>
+                        <div>
+                          <div class="text-xs opacity-70 mb-2">完整任务图</div>
+                          <div class="space-y-2 max-h-72 overflow-auto pr-1">
+                            <div
+                              v-for="task in workflowAllTasks(workflowReplayRecord('job', jobsStore.currentJobId)?.workflow)"
+                              :key="`job-${jobsStore.currentJobId}-${task.task_id}`"
+                              class="rounded-xl border border-slate-200/70 px-2 py-2"
+                            >
+                              <div class="flex items-center justify-between gap-2">
+                                <div class="text-xs font-medium break-words">{{ task.task_name || task.task_id }}</div>
+                                <n-tag size="tiny" :type="String(task.status || '') === 'completed' ? 'success' : String(task.status || '') === 'failed' ? 'error' : 'default'">
+                                  {{ workflowStatusLabel(task.status) }}
+                                </n-tag>
+                              </div>
+                              <div class="text-[11px] opacity-70 mt-1 break-words">
+                                {{ task.summary_for_ui || task.task_goal || '等待执行' }}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                        <div v-if="workflowAllTraces(workflowReplayRecord('job', jobsStore.currentJobId)?.workflow).length">
+                          <div class="text-xs opacity-70 mb-2">完整执行轨迹</div>
+                          <div class="space-y-2 max-h-72 overflow-auto pr-1">
+                            <div
+                              v-for="trace in workflowAllTraces(workflowReplayRecord('job', jobsStore.currentJobId)?.workflow)"
+                              :key="`job-${jobsStore.currentJobId}-${trace.task_id}-${trace.ts || ''}`"
+                              class="rounded-xl border border-slate-200/70 px-2 py-2"
+                            >
+                              <div class="text-xs font-medium">{{ trace.task_id }}</div>
+                              <div class="text-[11px] opacity-70 mt-1 break-words">
+                                {{ trace.compressed_result?.key_result || trace.compressed_result?.what_was_done || workflowStatusLabel(trace.status) }}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                        <div v-if="workflowAllErrors(workflowReplayRecord('job', jobsStore.currentJobId)?.workflow).length">
+                          <div class="text-xs opacity-70 mb-2">错误恢复</div>
+                          <div class="space-y-2 max-h-56 overflow-auto pr-1">
+                            <div
+                              v-for="row in workflowAllErrors(workflowReplayRecord('job', jobsStore.currentJobId)?.workflow)"
+                              :key="`job-${jobsStore.currentJobId}-${row.task_id || 'err'}-${row.ts || ''}`"
+                              class="rounded-xl border border-red-200/70 px-2 py-2"
+                            >
+                              <div class="text-xs font-medium">{{ row.task_id || '系统错误' }}</div>
+                              <div class="text-[11px] opacity-80 break-words mt-1">{{ row.error_message || row.error_type || '未知错误' }}</div>
+                              <div v-if="row.recovery_action" class="text-[11px] opacity-70 mt-1">恢复：{{ row.recovery_action }}</div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </n-spin>
+                  </div>
+                </div>
+              </div>
+
               <div class="rail-section rail-section--plain">
                 <div class="flex items-center justify-between gap-2 mb-2">
                   <div class="text-xs opacity-70">任务/检索线程日志（最近）</div>
@@ -868,6 +1188,7 @@ import { useUserStore } from '@/stores/modules/useUserStore'
 import { useGlobalStore } from '@/stores/global-store'
 import {
   createChatSessionApi,
+  getAgentWorkflowStateApi,
   listActiveSearchTasksApi,
   listChatMessagesApi,
   listChatModelsApi,
@@ -881,7 +1202,7 @@ import {
 } from '@/api/chat'
 import { buildJobNoteDownloadUrl, getAdminJobPushLogsApi, getJobNoteApi, getJobNoteLinkApi } from '@/api/jobs'
 import { buildApiUrl, getAuthToken } from '@/api/client'
-import type { ChatImageAttachment, ChatMessage, ChatModelItem, ChatQuoteReference, JobCreateResponse, TopicQueueBatchSummary, TopicSelectedVideo } from '@/api/types'
+import type { AgentWorkflow, AgentWorkflowStateItem, ChatImageAttachment, ChatMessage, ChatModelItem, ChatQuoteReference, JobCreateResponse, TopicQueueBatchSummary, TopicSelectedVideo } from '@/api/types'
 import MarkdownContent from '@/components/MarkdownContent.vue'
 
 type UiComposerImage = ChatImageAttachment & {
@@ -915,6 +1236,8 @@ type UiChatMessage = {
   searchProgressVisible?: boolean
   streaming?: boolean
   preferMarkdown?: boolean
+  agentWorkflowStateKey?: string
+  agentWorkflow?: AgentWorkflow | null
 }
 
 const router = useRouter()
@@ -959,6 +1282,9 @@ const selectingVideoState = ref<Record<string, boolean>>({})
 const candidateSelectionState = ref<Record<string, Record<string, boolean>>>({})
 const batchSelectingJobs = ref<Record<string, boolean>>({})
 const candidatePageState = ref<Record<string, number>>({})
+const workflowReplayOpenState = ref<Record<string, boolean>>({})
+const workflowReplayLoadingState = ref<Record<string, boolean>>({})
+const workflowReplayRecords = ref<Record<string, AgentWorkflowStateItem | null>>({})
 const taskRailOpen = ref(false)
 const quoteContextMenu = ref({
   visible: false,
@@ -982,6 +1308,12 @@ const candidateFullscreenPreview = ref({
 
 const currentJobState = computed(() => (jobsStore.currentJobId ? jobsStore.jobs[jobsStore.currentJobId] : null))
 const currentSnapshot = computed(() => currentJobState.value?.snapshot || null)
+const currentJobWorkflow = computed(() =>
+  (currentJobState.value?.agentWorkflow
+    || currentSnapshot.value?.agent_workflow
+    || ((currentSnapshot.value?.result as any)?.agent_workflow ?? null)
+    || null) as AgentWorkflow | null,
+)
 const uploadingComposerImages = computed(() =>
   composerImages.value.some((img) => img.uploadStatus === 'uploading'),
 )
@@ -1105,6 +1437,144 @@ const taskSnapshotByJob = computed(() => {
   }
   return out
 })
+
+function workflowStatusLabel(status?: string) {
+  const s = String(status || '').trim().toLowerCase()
+  if (s === 'completed') return '已完成'
+  if (s === 'running') return '进行中'
+  if (s === 'failed') return '失败'
+  if (s === 'degraded') return '降级'
+  if (s === 'retrying') return '重试中'
+  if (s === 'blocked') return '阻塞'
+  if (s === 'skipped') return '已跳过'
+  return '待执行'
+}
+
+function workflowTaskPreview(workflow?: AgentWorkflow | null) {
+  const rows = Array.isArray(workflow?.task_graph) ? workflow!.task_graph! : []
+  return rows.slice(0, 8)
+}
+
+function workflowRecentTrace(workflow?: AgentWorkflow | null) {
+  const rows = Array.isArray(workflow?.execution_trace) ? workflow!.execution_trace! : []
+  return rows.slice(-5).reverse()
+}
+
+function workflowErrorPreview(workflow?: AgentWorkflow | null) {
+  const rows = Array.isArray(workflow?.error_handling) ? workflow!.error_handling! : []
+  return rows.slice(-3).reverse()
+}
+
+function workflowResourceGroups(workflow?: AgentWorkflow | null) {
+  const grouped = workflow?.resource_recommendations || {}
+  return [
+    { label: '合集', items: Array.isArray(grouped.playlists) ? grouped.playlists : [] },
+    { label: '单视频', items: Array.isArray(grouped.single_videos) ? grouped.single_videos : [] },
+    { label: '课程', items: Array.isArray(grouped.courses) ? grouped.courses : [] },
+  ].filter((row) => row.items.length)
+}
+
+function workflowDecisionText(workflow?: AgentWorkflow | null) {
+  const d = workflow?.master_decision || {}
+  return String(d.reason || d.decision || '').trim()
+}
+
+function workflowCurrentStage(workflow?: AgentWorkflow | null) {
+  return String(workflow?.master_plan?.current_stage || '').trim()
+}
+
+function workflowAllTasks(workflow?: AgentWorkflow | null) {
+  return Array.isArray(workflow?.task_graph) ? workflow!.task_graph! : []
+}
+
+function workflowAllTraces(workflow?: AgentWorkflow | null) {
+  return Array.isArray(workflow?.execution_trace) ? workflow!.execution_trace! : []
+}
+
+function workflowAllErrors(workflow?: AgentWorkflow | null) {
+  return Array.isArray(workflow?.error_handling) ? workflow!.error_handling! : []
+}
+
+function workflowReplayCacheKey(scope: string, stateKey: string) {
+  return `${String(scope || '').trim()}:${String(stateKey || '').trim()}`
+}
+
+function workflowReplayRecord(scope: string, stateKey: string) {
+  return workflowReplayRecords.value[workflowReplayCacheKey(scope, stateKey)] || null
+}
+
+function workflowReplayOpen(scope: string, stateKey: string) {
+  return Boolean(workflowReplayOpenState.value[workflowReplayCacheKey(scope, stateKey)])
+}
+
+function workflowReplayLoading(scope: string, stateKey: string) {
+  return Boolean(workflowReplayLoadingState.value[workflowReplayCacheKey(scope, stateKey)])
+}
+
+function workflowReplayArtifactsPreview(record?: AgentWorkflowStateItem | null) {
+  const artifacts = (record?.artifacts || {}) as Record<string, any>
+  const rows: Array<{ label: string; value: string }> = []
+  const searchQuerySeed = String(artifacts?.search_query_seed || '').trim()
+  if (searchQuerySeed) rows.push({ label: '检索种子', value: searchQuerySeed })
+  const dispatchCount = Number(artifacts?.dispatch_result_count || 0)
+  if (dispatchCount > 0) rows.push({ label: '结果数', value: String(dispatchCount) })
+  const progressEvents = Array.isArray(artifacts?.progress_events) ? artifacts.progress_events.length : 0
+  if (progressEvents > 0) rows.push({ label: '进度事件', value: String(progressEvents) })
+  const learningPath = artifacts?.learning_path as Record<string, any> | undefined
+  if (learningPath && Array.isArray(learningPath?.stages) && learningPath.stages.length) {
+    rows.push({ label: '学习阶段', value: String(learningPath.stages.length) })
+  }
+  const assistantPreview = String(artifacts?.assistant_text_preview || '').trim()
+  if (assistantPreview) rows.push({ label: '答复预览', value: assistantPreview })
+  return rows
+}
+
+async function ensureWorkflowReplay(scope: 'chat' | 'job', stateKey: string) {
+  const normalizedScope = String(scope || '').trim() as 'chat' | 'job'
+  const normalizedKey = String(stateKey || '').trim()
+  if (!normalizedScope || !normalizedKey) return null
+  const cacheKey = workflowReplayCacheKey(normalizedScope, normalizedKey)
+  if (workflowReplayRecords.value[cacheKey]) return workflowReplayRecords.value[cacheKey]
+  workflowReplayLoadingState.value = { ...workflowReplayLoadingState.value, [cacheKey]: true }
+  try {
+    const res = await getAgentWorkflowStateApi(normalizedScope, normalizedKey)
+    const item = (res?.item || null) as AgentWorkflowStateItem | null
+    workflowReplayRecords.value = { ...workflowReplayRecords.value, [cacheKey]: item }
+    return item
+  } finally {
+    workflowReplayLoadingState.value = { ...workflowReplayLoadingState.value, [cacheKey]: false }
+  }
+}
+
+async function toggleMessageWorkflowReplay(msg: UiChatMessage) {
+  const stateKey = String(msg.agentWorkflowStateKey || '').trim()
+  if (!stateKey) return
+  const cacheKey = workflowReplayCacheKey('chat', stateKey)
+  const nextOpen = !workflowReplayOpenState.value[cacheKey]
+  workflowReplayOpenState.value = { ...workflowReplayOpenState.value, [cacheKey]: nextOpen }
+  if (!nextOpen) return
+  try {
+    await ensureWorkflowReplay('chat', stateKey)
+  } catch (e: any) {
+    workflowReplayOpenState.value = { ...workflowReplayOpenState.value, [cacheKey]: false }
+    message.error(e?.message || '加载任务链回放失败')
+  }
+}
+
+async function toggleCurrentJobWorkflowReplay() {
+  const stateKey = String(jobsStore.currentJobId || '').trim()
+  if (!stateKey) return
+  const cacheKey = workflowReplayCacheKey('job', stateKey)
+  const nextOpen = !workflowReplayOpenState.value[cacheKey]
+  workflowReplayOpenState.value = { ...workflowReplayOpenState.value, [cacheKey]: nextOpen }
+  if (!nextOpen) return
+  try {
+    await ensureWorkflowReplay('job', stateKey)
+  } catch (e: any) {
+    workflowReplayOpenState.value = { ...workflowReplayOpenState.value, [cacheKey]: false }
+    message.error(e?.message || '加载任务链回放失败')
+  }
+}
 
 function setSidebarLogViewMode(mode: 'normal' | 'detail') {
   if (mode === 'detail' && !isAdminUser.value) {
@@ -1888,6 +2358,8 @@ async function loadSessionFromRoute(sessionUuidFromRoute: string) {
       searchProgressVisible: false,
       streaming: false,
       preferMarkdown: false,
+      agentWorkflowStateKey: String((m.meta as any)?.agent_workflow_state_key || '').trim() || undefined,
+      agentWorkflow: ((m.meta as any)?.agent_workflow as AgentWorkflow | null) ?? null,
     }))
     messages.value = loaded
     cacheSessionMessages(sessionUuid, loaded)
@@ -1953,6 +2425,8 @@ function appendUiMessage(payload: Partial<UiChatMessage> & Pick<UiChatMessage, '
     searchProgressVisible: Boolean(payload.searchProgressVisible),
     streaming: Boolean(payload.streaming),
     preferMarkdown: Boolean(payload.preferMarkdown),
+    agentWorkflowStateKey: String(payload.agentWorkflowStateKey || '').trim() || undefined,
+    agentWorkflow: payload.agentWorkflow ?? null,
   }
   messages.value.push(item)
   cacheSessionMessages(chatSessionUuid.value, messages.value)
@@ -1995,6 +2469,8 @@ function mapAssistantMessage(msg: ChatMessage, task: JobCreateResponse | null, t
     searchProgressVisible: false,
     streaming: false,
     preferMarkdown: false,
+    agentWorkflowStateKey: String((msg?.meta as any)?.agent_workflow_state_key || '').trim() || undefined,
+    agentWorkflow: ((msg?.meta as any)?.agent_workflow as AgentWorkflow | null) ?? null,
   })
 }
 
@@ -2166,6 +2642,9 @@ async function sendMessage() {
             ? (meta.knowledge_hits as Array<Record<string, any>>)
             : []
           pendingAssistant.taskSnapshot = ((meta?.task_snapshot as Record<string, any>) || pendingAssistant.taskSnapshot || null)
+          pendingAssistant.agentWorkflowStateKey =
+            String((meta as any)?.agent_workflow_state_key || '').trim() || pendingAssistant.agentWorkflowStateKey
+          pendingAssistant.agentWorkflow = ((meta?.agent_workflow as AgentWorkflow | null) || pendingAssistant.agentWorkflow || null)
           if (Array.isArray(meta?.search_modes)) {
             const modes = (meta.search_modes as string[]).map((x) => String(x || '').toLowerCase())
             retrievalModeNetwork.value = modes.includes('network')
@@ -2251,12 +2730,21 @@ async function sendMessage() {
           if ((msg?.meta as any)?.task_snapshot) {
             pendingAssistant.taskSnapshot = (msg?.meta as any).task_snapshot as Record<string, any>
           }
+          pendingAssistant.agentWorkflowStateKey =
+            String((msg?.meta as any)?.agent_workflow_state_key || '').trim() || pendingAssistant.agentWorkflowStateKey
           pendingAssistant.knowledgeLookupUsed = Boolean(msg?.meta?.knowledge_lookup?.used) || pendingAssistant.knowledgeLookupUsed
           pendingAssistant.knowledgeLookupReason =
             String(msg?.meta?.knowledge_lookup?.reason || '').trim() || pendingAssistant.knowledgeLookupReason
           if (Array.isArray(msg?.meta?.knowledge_hits)) {
             pendingAssistant.knowledgeHits = msg.meta.knowledge_hits as Array<Record<string, any>>
           }
+          if ((msg?.meta as any)?.agent_workflow) {
+            pendingAssistant.agentWorkflow = (msg?.meta as any).agent_workflow as AgentWorkflow
+          }
+        },
+        onAgentUpdate: (data) => {
+          const workflow = (data?.workflow || null) as AgentWorkflow | null
+          if (workflow) pendingAssistant.agentWorkflow = workflow
         },
         onSearchLog: (data) => {
           appendSearchTaskLog(data || {})
@@ -2338,6 +2826,11 @@ async function sendMessage() {
             }
             if ((lastAssistant?.meta as any)?.task_snapshot) {
               pendingAssistant.taskSnapshot = (lastAssistant?.meta as any)?.task_snapshot as Record<string, any>
+            }
+            pendingAssistant.agentWorkflowStateKey =
+              String((lastAssistant?.meta as any)?.agent_workflow_state_key || '').trim() || pendingAssistant.agentWorkflowStateKey
+            if ((lastAssistant?.meta as any)?.agent_workflow) {
+              pendingAssistant.agentWorkflow = (lastAssistant?.meta as any)?.agent_workflow as AgentWorkflow
             }
           }
         } catch {

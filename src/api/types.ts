@@ -242,6 +242,146 @@ export interface TopicJobResult {
   queue_runtime?: QueueRuntimeInfo
 }
 
+export type AgentTaskStatus =
+  | 'pending'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'degraded'
+  | 'retrying'
+  | 'blocked'
+  | 'skipped'
+
+export type AgentDecisionType =
+  | 'continue_next_step'
+  | 'start_parallel_tasks'
+  | 'merge_partial_results'
+  | 'retry_failed_step'
+  | 'fallback_to_degraded_mode'
+  | 'replan_workflow'
+  | 'wait_for_required_dependency'
+  | 'finalize_output'
+
+export interface AgentWorkflowTask {
+  task_id: string
+  task_name?: string
+  task_goal?: string
+  task_type?: string
+  inputs?: unknown[]
+  expected_output?: string
+  dependencies?: string[]
+  can_run_in_parallel?: boolean
+  priority?: number
+  assigned_agent?: string
+  status?: AgentTaskStatus | string
+  summary_for_ui?: string
+  detail?: string
+  updated_at?: string
+}
+
+export interface AgentWorkflowTraceRow {
+  task_id: string
+  status?: AgentTaskStatus | string
+  raw_result?: unknown
+  compressed_result?: {
+    what_was_done?: string
+    key_result?: string
+    success?: boolean
+    has_error?: boolean
+    error_summary?: string
+    recoverable?: boolean
+    next_step_suggestion?: string
+  }
+  ts?: string
+}
+
+export interface AgentWorkflowErrorRow {
+  task_id?: string
+  error_type?: string
+  error_message?: string
+  impact_scope?: string
+  recovery_action?: string
+  recovery_status?: string
+  ts?: string
+}
+
+export interface AgentWorkflowResource {
+  resource_title?: string
+  resource_type?: string
+  learning_stage?: string
+  recommended_reason?: string
+  is_playlist?: boolean
+  resource_group_type?: 'single_video' | 'playlist' | 'course' | string
+  fits_current_level?: boolean
+  recommended_priority?: number
+  url?: string
+  up?: string
+  duration?: string
+  platform?: string
+}
+
+export interface AgentWorkflow {
+  user_request?: string
+  recognized_intent?: Record<string, unknown>
+  master_plan?: {
+    main_goal?: string
+    workflow_status?: AgentTaskStatus | string
+    current_stage?: string
+    reasoning_summary?: string
+  }
+  task_graph?: AgentWorkflowTask[]
+  execution_trace?: AgentWorkflowTraceRow[]
+  parallel_branches?: Array<{
+    branch_id?: string
+    branch_name?: string
+    included_tasks?: string[]
+    status?: AgentTaskStatus | string
+  }>
+  error_handling?: AgentWorkflowErrorRow[]
+  resource_recommendations?: {
+    single_videos?: AgentWorkflowResource[]
+    playlists?: AgentWorkflowResource[]
+    courses?: AgentWorkflowResource[]
+  }
+  master_decision?: {
+    decision?: AgentDecisionType | string
+    reason?: string
+    next_actions?: string[]
+  }
+  final_output?: {
+    answer?: string
+    notes?: string[]
+    attachments?: Array<Record<string, unknown>>
+  }
+  updated_at?: string
+}
+
+export interface AgentWorkflowStateItem {
+  scope: 'chat' | 'job' | string
+  state_key: string
+  user_id?: number | null
+  username?: string | null
+  session_uuid?: string | null
+  job_id?: string | null
+  request_id?: string | null
+  status?: AgentTaskStatus | string
+  workflow?: AgentWorkflow | null
+  artifacts?: Record<string, unknown> | null
+  resource_recommendations?: {
+    single_videos?: AgentWorkflowResource[]
+    playlists?: AgentWorkflowResource[]
+    courses?: AgentWorkflowResource[]
+  } | null
+  created_at?: string
+  updated_at?: string
+  finished_at?: string | null
+}
+
+export interface AgentWorkflowStateResponse {
+  ok: boolean
+  item: AgentWorkflowStateItem
+}
+
 export interface JobSnapshot {
   job_id: string
   user_input: string
@@ -255,6 +395,13 @@ export interface JobSnapshot {
   detail: string
   error: string | null
   result: SingleVideoJobResult | TopicJobResult | Record<string, unknown> | null
+  agent_workflow?: AgentWorkflow | null
+  agent_artifacts?: Record<string, unknown> | null
+  resource_recommendations?: {
+    single_videos?: AgentWorkflowResource[]
+    playlists?: AgentWorkflowResource[]
+    courses?: AgentWorkflowResource[]
+  } | null
 }
 
 export interface JobNoteLinkResponse {
@@ -284,6 +431,17 @@ export type JobEvent =
   | { type?: 'job_created'; ts?: string; input?: string }
   | { type: 'status'; ts?: string; stage?: string; detail?: string }
   | { type: 'log'; ts?: string; message?: string }
+  | {
+      type: 'agent_update'
+      ts?: string
+      scope?: 'chat' | 'job' | string
+      workflow?: AgentWorkflow | null
+      delta?: {
+        kind?: 'task_status' | 'trace' | 'decision' | 'error' | 'resource' | 'final_output' | string
+        task_id?: string
+        status?: AgentTaskStatus | string
+      }
+    }
   | { type: 'completed'; ts?: string; result?: unknown }
   | { type: 'failed'; ts?: string; error?: string; traceback?: string }
   | { ts?: string }
@@ -346,6 +504,13 @@ export interface ChatMessage {
       tasks?: Array<Record<string, unknown>>
       result_count?: number
     }
+    agent_workflow_state_key?: string | null
+    agent_workflow?: AgentWorkflow | null
+    resource_recommendations?: {
+      single_videos?: AgentWorkflowResource[]
+      playlists?: AgentWorkflowResource[]
+      courses?: AgentWorkflowResource[]
+    } | null
     [key: string]: unknown
   }
   created_at?: string

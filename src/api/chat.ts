@@ -1,5 +1,6 @@
 import { apiRequest, buildApiUrl, getAuthToken } from './client'
 import type {
+  AgentWorkflowStateResponse,
   ChatSelectCandidateVideoRequest,
   ChatSelectCandidateVideoResponse,
   ChatSelectCandidateVideosBatchRequest,
@@ -49,6 +50,17 @@ export function deleteChatSessionApi(sessionUuid: string) {
 
 export function listChatMessagesApi(sessionUuid: string, limit = 100) {
   return apiRequest<ChatMessagesResponse>(`/chat/sessions/${sessionUuid}/messages?limit=${limit}`, {
+    method: 'GET',
+    auth: true,
+  })
+}
+
+export function getAgentWorkflowStateApi(scope: 'chat' | 'job' | string, stateKey: string) {
+  const q = new URLSearchParams({
+    scope: String(scope || '').trim(),
+    state_key: String(stateKey || '').trim(),
+  })
+  return apiRequest<AgentWorkflowStateResponse>(`/agent-workflows/state?${q.toString()}`, {
     method: 'GET',
     auth: true,
   })
@@ -171,6 +183,7 @@ type StreamHandlers = {
   onDelta?: (text: string, data: any) => void
   onDone?: (data: any) => void
   onSaved?: (data: any) => void
+  onAgentUpdate?: (data: any) => void
   onSearchLog?: (data: any) => void
   onSearchResult?: (data: any) => void
   onSearchStatus?: (data: any) => void
@@ -237,6 +250,7 @@ export async function sendChatMessageStreamApi(
     else if (eventName === 'delta') handlers.onDelta?.(String(data?.text || ''), data)
     else if (eventName === 'done') handlers.onDone?.(data)
     else if (eventName === 'saved') handlers.onSaved?.(data)
+    else if (eventName === 'agent_update') handlers.onAgentUpdate?.(data)
     else if (eventName === 'search_log') handlers.onSearchLog?.(data)
     else if (eventName === 'search_result') handlers.onSearchResult?.(data)
     else if (eventName === 'search_status') handlers.onSearchStatus?.(data)

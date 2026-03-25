@@ -1,12 +1,13 @@
 import { defineStore } from 'pinia'
 import { openJobEventsWS } from '@/api/ws'
 import { buildJobEventsWsUrl, getJobApi, getJobNoteApi, getJobNoteLinkApi, createJobApi, deleteJobApi } from '@/api/jobs'
-import type { JobCreateRequest, JobSnapshot, JobEvent, JobNoteLinkResponse } from '@/api/types'
+import type { AgentWorkflow, JobCreateRequest, JobSnapshot, JobEvent, JobNoteLinkResponse } from '@/api/types'
 
 type SseStatus = 'idle' | 'connecting' | 'connected' | 'disconnected'
 
 type JobUiState = {
   snapshot: JobSnapshot | null
+  agentWorkflow: AgentWorkflow | null
   logs: Array<{ ts?: string; message: string }>
   events: Array<{ type: string; data: any }>
   sseStatus: SseStatus
@@ -111,6 +112,7 @@ function ensureJobUi(map: Record<string, JobUiState>, jobId: string): JobUiState
   if (!map[jobId]) {
     map[jobId] = {
       snapshot: null,
+      agentWorkflow: null,
       logs: [],
       events: [],
       sseStatus: 'idle',
@@ -173,6 +175,7 @@ export const useJobsStore = defineStore('jobs', {
       const snap = await getJobApi(jobId)
       const jobUi = ensureJobUi(this.jobs, jobId)
       jobUi.snapshot = snap
+      jobUi.agentWorkflow = (snap.agent_workflow || (snap.result as any)?.agent_workflow || null) as AgentWorkflow | null
       return snap
     },
     async fetchNote(jobId: string) {
@@ -212,9 +215,27 @@ export const useJobsStore = defineStore('jobs', {
     },
     _applyRealtimeEvent(jobId: string, type: string, data: unknown) {
       const jobUi = ensureJobUi(this.jobs, jobId)
-      if (type === 'heartbeat' || type === 'pong' || type === 'ws_status' || type === 'snapshot') return
+      if (type === 'heartbeat' || type === 'pong' || type === 'ws_status') return
+      if (type === 'snapshot') {
+        const snap = data as JobSnapshot
+        jobUi.snapshot = snap
+        jobUi.agentWorkflow = (snap?.agent_workflow || (snap?.result as any)?.agent_workflow || null) as AgentWorkflow | null
+        return
+      }
       jobUi.events.push({ type, data })
       if (jobUi.events.length > 1000) jobUi.events = jobUi.events.slice(-600)
+      if (type === 'agent_update') {
+        const d = data as any
+        if (d?.workflow && typeof d.workflow === 'object') {
+          jobUi.agentWorkflow = d.workflow as AgentWorkflow
+          if (jobUi.snapshot) {
+            jobUi.snapshot = {
+              ...jobUi.snapshot,
+              agent_workflow: d.workflow as AgentWorkflow,
+            }
+          }
+        }
+      }
       if (type === 'status') {
         const d = data as any
         if (jobUi.snapshot) {
@@ -305,6 +326,7 @@ export const useJobsStore = defineStore('jobs', {
         },
         onSnapshot: (snapshot) => {
           jobUi.snapshot = snapshot
+          jobUi.agentWorkflow = (snapshot.agent_workflow || (snapshot.result as any)?.agent_workflow || null) as AgentWorkflow | null
           jobUi.sseStatus = 'connected'
         },
         onEvent: (type, data) => {
@@ -326,6 +348,9 @@ export const useJobsStore = defineStore('jobs', {
               detail: '任务已完成',
               result: d.result ?? jobUi.snapshot.result,
             }
+          }
+          if ((d?.result as any)?.agent_workflow) {
+            jobUi.agentWorkflow = (d.result as any).agent_workflow as AgentWorkflow
           }
           jobUi.logs.push({ ts: new Date().toISOString(), message: '当前任务已完成' })
           if (jobUi.logs.length > 2000) jobUi.logs = jobUi.logs.slice(-1200)
