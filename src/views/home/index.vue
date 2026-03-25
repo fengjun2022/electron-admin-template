@@ -20,7 +20,7 @@
                   type="button"
                   class="rail-toggle-btn"
                   :class="{ 'rail-toggle-btn--active': showTaskRail }"
-                  :title="showTaskRail ? '收起任务栏' : '展开任务栏'"
+                  :title="showTaskRail ? '收起 Agent' : '展开 Agent'"
                   @click="toggleTaskRail"
                 >
                   <n-icon
@@ -29,7 +29,7 @@
                     class="rail-toggle-btn__icon"
                     :class="{ 'rail-toggle-btn__icon--open': showTaskRail }"
                   />
-                  <span class="text-xs">{{ showTaskRail ? '收起任务栏' : '任务栏' }}</span>
+                  <span class="text-xs">{{ showTaskRail ? '收起 Agent' : 'Agent' }}</span>
                 </button>
                 <div class="text-xs opacity-60 shrink-0">{{ modelsLoading ? '模型加载中...' : '' }}</div>
               </div>
@@ -206,29 +206,68 @@
                             </div>
                           </div>
                         </div>
-                        <div v-if="workflowResourceGroups(msg.agentWorkflow).length" class="mt-3">
-                          <div class="text-xs opacity-70 mb-1">推荐资源</div>
+                        <div v-if="workflowResourceCardGroups(msg.agentWorkflow).length" class="mt-3">
+                          <div class="text-xs opacity-70 mb-2">推荐资源</div>
                           <div
-                            v-for="group in workflowResourceGroups(msg.agentWorkflow)"
+                            v-for="group in workflowResourceCardGroups(msg.agentWorkflow)"
                             :key="group.label"
-                            class="mb-2"
+                            class="mb-3"
                           >
                             <div class="text-[11px] font-medium mb-1">{{ group.label }}</div>
-                            <div
-                              v-for="item in group.items.slice(0, 3)"
-                              :key="`${group.label}-${item.url || item.resource_title}`"
-                              class="text-[11px] leading-5 break-words"
-                            >
-                              <a
-                                v-if="item.url"
-                                :href="String(item.url)"
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                class="underline"
+                            <div class="grid grid-cols-2 gap-2">
+                              <div
+                                v-for="(video, idx) in group.items"
+                                :key="`${group.label}-${video.url || video.title || idx}`"
+                                class="rounded-xl p-2 ai-candidate-card flex flex-col"
                               >
-                                {{ item.resource_title || item.url }}
-                              </a>
-                              <span v-else>{{ item.resource_title }}</span>
+                                <div class="rounded-lg overflow-hidden ai-candidate-cover mb-2 relative">
+                                  <img
+                                    v-if="videoCoverUrl(video)"
+                                    :src="videoCoverUrl(video) || undefined"
+                                    alt="视频封面"
+                                    class="w-full aspect-video object-cover"
+                                    loading="lazy"
+                                    referrerpolicy="no-referrer"
+                                    @click="openVideoUrl(video)"
+                                  />
+                                  <div v-else class="w-full aspect-video flex items-center justify-center text-xs opacity-60">
+                                    暂无封面
+                                  </div>
+                                  <button
+                                    v-if="canPreviewCandidate(video)"
+                                    type="button"
+                                    class="ai-candidate-cover__fullscreen"
+                                    title="全屏预览"
+                                    @click.stop="openCandidateFullscreen(video)"
+                                  >
+                                    全屏
+                                  </button>
+                                </div>
+                                <div class="text-xs font-semibold leading-[1.45] break-words ai-candidate-card__title line-clamp-2">
+                                  {{ candidateDisplayTitle(video, idx) }}
+                                </div>
+                                <div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] ai-candidate-card__meta">
+                                  <span v-if="video.up">{{ String(video.up) }}</span>
+                                  <span v-if="video.duration">{{ String(video.duration) }}</span>
+                                </div>
+                                <div v-if="candidateStatItems(video).length" class="mt-1 flex flex-wrap gap-1">
+                                  <span
+                                    v-for="(it, statIdx) in candidateStatItems(video)"
+                                    :key="`${group.label}-${idx}-${statIdx}-${it.label}-${it.value}`"
+                                    class="inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] ai-candidate-chip"
+                                  >
+                                    {{ it.label }} {{ it.value }}
+                                  </span>
+                                </div>
+                                <div class="mt-2 flex items-center justify-end gap-1">
+                                  <n-button size="tiny" secondary :disabled="!canOpenVideoUrl(video)" @click="openVideoUrl(video)">
+                                    打开原视频
+                                  </n-button>
+                                  <n-button size="tiny" secondary :disabled="!canPreviewCandidate(video)" @click="openCandidateFullscreen(video)">
+                                    全屏预览
+                                  </n-button>
+                                </div>
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -739,7 +778,7 @@
             <n-card v-if="showTaskRail" :bordered="false" class="h-full right-rail-card">
           <template #header>
             <div class="flex items-center justify-between">
-              <span class="font-semibold">当前任务进度</span>
+              <span class="font-semibold">Agent</span>
               <n-tag size="small" :type="tagType(currentSnapshot?.status)">
                 {{ statusLabel(currentSnapshot?.status) }}
               </n-tag>
@@ -1285,7 +1324,7 @@ const candidatePageState = ref<Record<string, number>>({})
 const workflowReplayOpenState = ref<Record<string, boolean>>({})
 const workflowReplayLoadingState = ref<Record<string, boolean>>({})
 const workflowReplayRecords = ref<Record<string, AgentWorkflowStateItem | null>>({})
-const taskRailOpen = ref(false)
+const taskRailOpen = ref(true)
 const quoteContextMenu = ref({
   visible: false,
   x: 0,
@@ -1465,12 +1504,44 @@ function workflowErrorPreview(workflow?: AgentWorkflow | null) {
   return rows.slice(-3).reverse()
 }
 
-function workflowResourceGroups(workflow?: AgentWorkflow | null) {
+function workflowResourceToVideo(item: Record<string, any>): TopicSelectedVideo | null {
+  if (!item || typeof item !== 'object') return null
+  const title = String(item.resource_title || item.title || '').trim()
+  const url = String(item.page_url || item.url || '').trim()
+  if (!title && !url) return null
+  return {
+    title,
+    url: String(item.url || item.page_url || '').trim(),
+    page_url: String(item.page_url || item.url || '').trim(),
+    play_url: String(item.play_url || '').trim(),
+    cover: String(item.cover || item.pic || item.thumbnail || '').trim(),
+    up: String(item.up || '').trim(),
+    duration: String(item.duration || '').trim(),
+    stats: String(item.stats || '').trim(),
+    platform: String(item.platform || '').trim(),
+  } as TopicSelectedVideo
+}
+
+function workflowResourceCardGroups(workflow?: AgentWorkflow | null) {
   const grouped = workflow?.resource_recommendations || {}
+  const toVideos = (rows: unknown[]) => {
+    const out: TopicSelectedVideo[] = []
+    const seen = new Set<string>()
+    for (const row of rows) {
+      if (!row || typeof row !== 'object') continue
+      const v = workflowResourceToVideo(row as Record<string, any>)
+      if (!v) continue
+      const key = String((v as any).page_url || v.url || v.title || '').trim().toLowerCase()
+      if (!key || seen.has(key)) continue
+      seen.add(key)
+      out.push(v)
+    }
+    return out
+  }
   return [
-    { label: '合集', items: Array.isArray(grouped.playlists) ? grouped.playlists : [] },
-    { label: '单视频', items: Array.isArray(grouped.single_videos) ? grouped.single_videos : [] },
-    { label: '课程', items: Array.isArray(grouped.courses) ? grouped.courses : [] },
+    { label: '推荐视频合集', items: toVideos(Array.isArray((grouped as any).playlists) ? (grouped as any).playlists : []).slice(0, 4) },
+    { label: '推荐单视频', items: toVideos(Array.isArray((grouped as any).single_videos) ? (grouped as any).single_videos : []).slice(0, 6) },
+    { label: '推荐课程专题', items: toVideos(Array.isArray((grouped as any).courses) ? (grouped as any).courses : []).slice(0, 4) },
   ].filter((row) => row.items.length)
 }
 
@@ -2263,7 +2334,7 @@ function startNewConversation() {
   retrievalModeNetwork.value = true
   retrievalModeBili.value = false
   retrievalModeDouyin.value = false
-  taskRailOpen.value = false
+  taskRailOpen.value = true
   activeSearchTaskLogs.value = []
   videoPreviewState.value = {}
   closeCandidateFullscreen()
@@ -2735,11 +2806,15 @@ async function sendMessage() {
           }
           if ((msg?.meta as any)?.agent_workflow) {
             pendingAssistant.agentWorkflow = (msg?.meta as any).agent_workflow as AgentWorkflow
+            taskRailOpen.value = true
           }
         },
         onAgentUpdate: (data) => {
           const workflow = (data?.workflow || null) as AgentWorkflow | null
-          if (workflow) pendingAssistant.agentWorkflow = workflow
+          if (workflow) {
+            pendingAssistant.agentWorkflow = workflow
+            taskRailOpen.value = true
+          }
         },
         onSearchLog: (data) => {
           appendSearchTaskLog(data || {})

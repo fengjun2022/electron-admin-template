@@ -315,8 +315,12 @@ export interface AgentWorkflowResource {
   fits_current_level?: boolean
   recommended_priority?: number
   url?: string
+  page_url?: string
+  play_url?: string
+  cover?: string
   up?: string
   duration?: string
+  stats?: string
   platform?: string
 }
 
