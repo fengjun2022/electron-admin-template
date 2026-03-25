@@ -163,11 +163,11 @@
                       </n-button>
                     </div>
 
-                    <div v-if="msg.role === 'assistant' && workflowLearningPathSections(msg.agentWorkflow).length" class="mt-3 px-1">
+                    <div v-if="shouldRenderWorkflowLearningPathSections(msg)" class="mt-3 px-1">
                       <div class="rounded-2xl p-3 knowledge-hit-panel">
                         <div class="text-xs opacity-70 mb-2">按学习步骤推荐的视频</div>
                         <div
-                          v-for="section in workflowLearningPathSections(msg.agentWorkflow)"
+                          v-for="section in messageWorkflowLearningPathSections(msg)"
                           :key="`${msg.localId}-${section.stageId}`"
                           class="mb-4 last:mb-0"
                         >
@@ -366,10 +366,7 @@
                       </div>
                     </div>
 
-                    <div
-                      v-else-if="msg.role === 'assistant' && workflowResourceCardGroups(msg.agentWorkflow).length"
-                      class="mt-3 px-1"
-                    >
+                    <div v-else-if="shouldRenderWorkflowResourceCards(msg)" class="mt-3 px-1">
                       <div class="rounded-2xl p-3 knowledge-hit-panel">
                         <div class="text-xs opacity-70 mb-2">推荐资源</div>
                         <div
@@ -1728,6 +1725,74 @@ function workflowResourceToVideo(item: Record<string, any>): TopicSelectedVideo 
   } as TopicSelectedVideo
 }
 
+function normalizeWorkflowStageLabel(raw: unknown) {
+  const text = String(raw || '').trim()
+  if (!text) return ''
+  return text
+    .replace(/^第\s*[0-9一二三四五六七八九十百千两]+步\s*[：:]\s*/u, '')
+    .replace(/\s+/g, '')
+    .toLowerCase()
+}
+
+function workflowTraceStageVideos(workflow?: AgentWorkflow | null) {
+  const traces = Array.isArray(workflow?.execution_trace) ? workflow.execution_trace : []
+  const out: TopicSelectedVideo[] = []
+  const seen = new Set<string>()
+  for (const trace of traces) {
+    if (!trace || typeof trace !== 'object') continue
+    const taskId = String((trace as any).task_id || '').trim()
+    if (!taskId.includes('SEARCH_STAGE_RESOURCES')) continue
+    const rawResult = (trace as any).raw_result
+    const results = Array.isArray(rawResult?.results) ? rawResult.results : []
+    for (const result of results) {
+      if (!result || typeof result !== 'object') continue
+      const learningStage = String((result as any).learning_stage || '').trim()
+      const platform = String((result as any).mode || '').trim().toLowerCase()
+      const candidates = Array.isArray((result as any).candidates) ? (result as any).candidates : []
+      for (const row of candidates) {
+        if (!row || typeof row !== 'object') continue
+        const video = workflowResourceToVideo({
+          ...row,
+          learning_stage: String((row as any).learning_stage || learningStage || '').trim(),
+          platform: String((row as any).platform || platform || '').trim(),
+          page_url: String((row as any).page_url || (row as any).url || '').trim(),
+          url: String((row as any).url || (row as any).page_url || '').trim(),
+          play_url: String((row as any).play_url || '').trim(),
+          cover: String((row as any).cover || (row as any).pic || (row as any).thumbnail || '').trim(),
+          resource_type: String((row as any).resource_type || 'video').trim(),
+        })
+        if (!video) continue
+        const key = [
+          String((video as any).page_url || video.url || video.title || '').trim().toLowerCase(),
+          normalizeWorkflowStageLabel((video as any).learning_stage),
+        ].join('@@')
+        if (!key || seen.has(key)) continue
+        seen.add(key)
+        out.push(video)
+      }
+    }
+  }
+  return out
+}
+
+function mergeWorkflowStageVideos(...groups: TopicSelectedVideo[][]) {
+  const out: TopicSelectedVideo[] = []
+  const seen = new Set<string>()
+  for (const rows of groups) {
+    for (const video of rows || []) {
+      if (!video || typeof video !== 'object') continue
+      const key = [
+        String((video as any).page_url || video.url || video.title || '').trim().toLowerCase(),
+        normalizeWorkflowStageLabel((video as any).learning_stage),
+      ].join('@@')
+      if (!key || seen.has(key)) continue
+      seen.add(key)
+      out.push(video)
+    }
+  }
+  return out
+}
+
 function workflowLearningPath(workflow?: AgentWorkflow | null) {
   const attachments = Array.isArray(workflow?.final_output?.attachments) ? workflow!.final_output!.attachments! : []
   for (const row of attachments) {
@@ -1780,12 +1845,20 @@ function workflowLearningPathSections(workflow?: AgentWorkflow | null): Workflow
   const stages = Array.isArray(learningPath?.stages) ? learningPath!.stages : []
   if (!stages.length) return []
   const videos = workflowAllResourceVideos(workflow)
+  const traceVideos = workflowTraceStageVideos(workflow)
   const out: WorkflowLearningPathSection[] = []
   for (const [idx, stage] of stages.entries()) {
     if (!stage || typeof stage !== 'object') continue
     const title = String((stage as any).title || '').trim()
     if (!title) continue
-    const items = videos.filter((video) => String((video as any).learning_stage || '').trim() === title)
+    const normalizedTitle = normalizeWorkflowStageLabel(title)
+    const stageTraceVideos = traceVideos.filter(
+      (video) => normalizeWorkflowStageLabel((video as any).learning_stage) === normalizedTitle,
+    )
+    const stageResourceVideos = videos.filter(
+      (video) => normalizeWorkflowStageLabel((video as any).learning_stage) === normalizedTitle,
+    )
+    const items = mergeWorkflowStageVideos(stageTraceVideos, stageResourceVideos).slice(0, 6)
     out.push({
         stepIndex: idx + 1,
         stageId: String((stage as any).stage_id || `LP${idx + 1}`).trim(),
@@ -1797,6 +1870,26 @@ function workflowLearningPathSections(workflow?: AgentWorkflow | null): Workflow
       })
   }
   return out
+}
+
+function canRenderWorkflowMessageContent(msg?: UiChatMessage | null) {
+  if (!msg || msg.role !== 'assistant') return false
+  if (msg.pending || msg.streaming) return false
+  return Boolean(String(msg.content || '').trim())
+}
+
+function messageWorkflowLearningPathSections(msg?: UiChatMessage | null) {
+  if (!canRenderWorkflowMessageContent(msg)) return [] as WorkflowLearningPathSection[]
+  return workflowLearningPathSections(msg?.agentWorkflow)
+}
+
+function shouldRenderWorkflowLearningPathSections(msg?: UiChatMessage | null) {
+  return messageWorkflowLearningPathSections(msg).length > 0
+}
+
+function shouldRenderWorkflowResourceCards(msg?: UiChatMessage | null) {
+  if (!canRenderWorkflowMessageContent(msg)) return false
+  return workflowResourceCardGroups(msg?.agentWorkflow).length > 0
 }
 
 function workflowSupplementalResourceCardGroups(workflow?: AgentWorkflow | null) {
@@ -3114,6 +3207,10 @@ async function sendMessage() {
         onSaved: (savedData) => {
           const msg = (savedData?.assistant_message || null) as ChatMessage | null
           savedAssistantContent = sanitizeEvidenceTagText(String(msg?.content || ''))
+          if (savedAssistantContent.trim()) {
+            pendingAssistant.content = savedAssistantContent
+            pendingAssistant.pending = false
+          }
           applyChatQuota(msg?.meta || {})
           const messageKind = String(msg?.meta?.message_kind || '')
           pendingAssistant.renderAsMarkdown = true
