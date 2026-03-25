@@ -2508,11 +2508,6 @@ async function sendMessage() {
     message.warning('有图片上传失败，请重试或移除后再发送')
     return
   }
-  if (knowledgeRetrievalEnabled.value && !hasRichContext && !selectedSearchModes.value.length) {
-    message.warning('请至少勾选一个检索方式（联网检索 / B站检索 / 抖音检索）')
-    return
-  }
-
   appendUiMessage({ role: 'user', content: text, images, quote })
   userInput.value = ''
   composerQuote.value = null
