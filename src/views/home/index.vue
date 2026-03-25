@@ -20,7 +20,8 @@
                   type="button"
                   class="rail-toggle-btn"
                   :class="{ 'rail-toggle-btn--active': showTaskRail }"
-                  :title="showTaskRail ? '收起 Agent' : '展开 Agent'"
+                  :title="hasTaskRailContent ? (showTaskRail ? '收起 Agent' : '展开 Agent') : '等待 Agent 计划'"
+                  :disabled="!hasTaskRailContent"
                   @click="toggleTaskRail"
                 >
                   <n-icon
@@ -162,65 +163,45 @@
                       </n-button>
                     </div>
 
-                    <div v-if="msg.role === 'assistant' && (msg.agentWorkflow || msg.agentWorkflowStateKey)" class="mt-3 px-1">
+                    <div v-if="msg.role === 'assistant' && workflowLearningPathSections(msg.agentWorkflow).length" class="mt-3 px-1">
                       <div class="rounded-2xl p-3 knowledge-hit-panel">
-                        <div class="flex items-center justify-between gap-2 mb-2">
-                          <div class="text-xs knowledge-hit-panel__title">Agent 任务链</div>
-                          <n-tag v-if="msg.agentWorkflow" size="small" type="info">
-                            {{ workflowStatusLabel(msg.agentWorkflow?.master_plan?.workflow_status) }}
-                          </n-tag>
-                        </div>
-                        <div v-if="workflowCurrentStage(msg.agentWorkflow)" class="text-xs opacity-70 mb-2">
-                          当前阶段：{{ workflowCurrentStage(msg.agentWorkflow) }}
-                        </div>
-                        <div v-if="workflowDecisionText(msg.agentWorkflow)" class="text-xs mb-3">
-                          主决策：{{ workflowDecisionText(msg.agentWorkflow) }}
-                        </div>
-                        <div class="space-y-2">
-                          <div
-                            v-for="task in workflowTaskPreview(msg.agentWorkflow)"
-                            :key="task.task_id"
-                            class="rounded-xl p-2 knowledge-hit-card"
-                          >
-                            <div class="flex items-center justify-between gap-3">
-                              <div class="min-w-0 flex-1">
-                                <div class="text-xs font-medium break-words">{{ task.task_name || task.task_id }}</div>
-                                <div class="text-[11px] opacity-70 break-words">{{ task.summary_for_ui || task.task_goal || '等待执行' }}</div>
+                        <div class="text-xs opacity-70 mb-2">按学习步骤推荐的视频</div>
+                        <div
+                          v-for="section in workflowLearningPathSections(msg.agentWorkflow)"
+                          :key="`${msg.localId}-${section.stageId}`"
+                          class="mb-4 last:mb-0"
+                        >
+                          <div class="flex items-start justify-between gap-3 mb-2">
+                            <div class="min-w-0">
+                              <div class="text-sm font-semibold">
+                                第{{ section.stepIndex }}步：{{ section.title }}
                               </div>
-                              <n-tag size="tiny" :type="String(task.status || '') === 'completed' ? 'success' : String(task.status || '') === 'failed' ? 'error' : 'default'">
-                                {{ workflowStatusLabel(task.status) }}
-                              </n-tag>
+                              <div v-if="section.goal" class="text-xs opacity-80 mt-1">
+                                {{ section.goal }}
+                              </div>
+                              <div v-if="section.why" class="text-[11px] opacity-65 mt-1">
+                                为什么先学：{{ section.why }}
+                              </div>
+                              <div v-if="section.practiceHint" class="text-[11px] opacity-65 mt-1">
+                                练习建议：{{ section.practiceHint }}
+                              </div>
                             </div>
+                            <n-tag size="small" type="info">
+                              {{ Array.isArray(section.items) ? section.items.length : 0 }} 个视频
+                            </n-tag>
                           </div>
-                        </div>
-                        <div v-if="workflowRecentTrace(msg.agentWorkflow).length" class="mt-3">
-                          <div class="text-xs opacity-70 mb-1">最近执行</div>
-                          <div class="space-y-1">
+                          <div v-if="Array.isArray(section.items) && section.items.length" class="grid grid-cols-2 gap-2">
                             <div
-                              v-for="trace in workflowRecentTrace(msg.agentWorkflow)"
-                              :key="`${trace.task_id}-${trace.ts || ''}`"
-                              class="text-[11px] leading-5 break-words"
+                              v-for="(video, idx) in section.items"
+                              :key="`${section.stageId}-${video.url || video.title || idx}`"
+                              class="rounded-xl p-2 ai-candidate-card flex flex-col"
                             >
-                              <span class="font-medium">{{ trace.task_id }}</span>
-                              <span class="opacity-70"> · {{ trace.compressed_result?.key_result || trace.compressed_result?.what_was_done || workflowStatusLabel(trace.status) }}</span>
-                            </div>
-                          </div>
-                        </div>
-                        <div v-if="workflowResourceCardGroups(msg.agentWorkflow).length" class="mt-3">
-                          <div class="text-xs opacity-70 mb-2">推荐资源</div>
-                          <div
-                            v-for="group in workflowResourceCardGroups(msg.agentWorkflow)"
-                            :key="group.label"
-                            class="mb-3"
-                          >
-                            <div class="text-[11px] font-medium mb-1">{{ group.label }}</div>
-                            <div class="grid grid-cols-2 gap-2">
-                              <div
-                                v-for="(video, idx) in group.items"
-                                :key="`${group.label}-${video.url || video.title || idx}`"
-                                class="rounded-xl p-2 ai-candidate-card flex flex-col"
-                              >
-                                <div class="rounded-lg overflow-hidden ai-candidate-cover mb-2 relative">
+                              <div class="rounded-lg overflow-hidden ai-candidate-cover mb-2 relative">
+                                <button
+                                  type="button"
+                                  class="ai-candidate-cover__trigger"
+                                  @click="openCandidateFullscreen(video)"
+                                >
                                   <img
                                     v-if="videoCoverUrl(video)"
                                     :src="videoCoverUrl(video) || undefined"
@@ -228,21 +209,30 @@
                                     class="w-full aspect-video object-cover"
                                     loading="lazy"
                                     referrerpolicy="no-referrer"
-                                    @click="openVideoUrl(video)"
                                   />
                                   <div v-else class="w-full aspect-video flex items-center justify-center text-xs opacity-60">
                                     暂无封面
                                   </div>
-                                  <button
-                                    v-if="canPreviewCandidate(video)"
-                                    type="button"
-                                    class="ai-candidate-cover__fullscreen"
-                                    title="全屏预览"
-                                    @click.stop="openCandidateFullscreen(video)"
+                                  <div
+                                    v-if="videoEmbedUrl(video) || videoPlayableUrl(video)"
+                                    class="ai-candidate-cover__overlay"
                                   >
-                                    全屏
-                                  </button>
-                                </div>
+                                    <span class="ai-candidate-cover__play" title="播放视频">
+                                      <n-icon :component="Play" size="22" />
+                                    </span>
+                                  </div>
+                                </button>
+                                <button
+                                  v-if="canPreviewCandidate(video)"
+                                  type="button"
+                                  class="ai-candidate-cover__fullscreen"
+                                  title="全屏预览"
+                                  @click.stop="openCandidateFullscreen(video)"
+                                >
+                                  全屏
+                                </button>
+                              </div>
+                              <div class="min-w-0 flex-1 flex flex-col">
                                 <div class="text-xs font-semibold leading-[1.45] break-words ai-candidate-card__title line-clamp-2">
                                   {{ candidateDisplayTitle(video, idx) }}
                                 </div>
@@ -253,113 +243,210 @@
                                 <div v-if="candidateStatItems(video).length" class="mt-1 flex flex-wrap gap-1">
                                   <span
                                     v-for="(it, statIdx) in candidateStatItems(video)"
-                                    :key="`${group.label}-${idx}-${statIdx}-${it.label}-${it.value}`"
+                                    :key="`${section.stageId}-${idx}-${statIdx}-${it.label}-${it.value}`"
                                     class="inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] ai-candidate-chip"
                                   >
                                     {{ it.label }} {{ it.value }}
                                   </span>
                                 </div>
-                                <div class="mt-2 flex items-center justify-end gap-1">
+                              </div>
+                              <div class="mt-2 flex items-center justify-end">
+                                <n-space size="small">
+                                  <n-button
+                                    size="tiny"
+                                    secondary
+                                    @click="openVideoUrl(video)"
+                                    :disabled="!canOpenVideoUrl(video)"
+                                  >
+                                    打开原视频
+                                  </n-button>
+                                  <n-button
+                                    size="tiny"
+                                    secondary
+                                    @click="openCandidateFullscreen(video)"
+                                    :disabled="!canPreviewCandidate(video)"
+                                  >
+                                    全屏预览
+                                  </n-button>
+                                  <n-button
+                                    size="tiny"
+                                    type="primary"
+                                    @click="summarizeWorkflowResource(video)"
+                                    :loading="isSelectingWorkflowResource(video)"
+                                    :disabled="!String(video.url || '').trim() || !chatSessionUuid"
+                                  >
+                                    总结笔记
+                                  </n-button>
+                                </n-space>
+                              </div>
+                            </div>
+                          </div>
+                          <div v-else class="text-xs opacity-60 rounded-xl px-3 py-3 border border-slate-200/70">
+                            这一阶段本轮还没有筛到足够匹配的视频，可继续补检索。
+                          </div>
+                        </div>
+                        <div
+                          v-for="group in workflowSupplementalResourceCardGroups(msg.agentWorkflow)"
+                          :key="`supplement-${group.label}`"
+                          class="mt-4"
+                        >
+                          <div class="text-[11px] font-medium mb-1">{{ group.label }}</div>
+                          <div class="grid grid-cols-2 gap-2">
+                            <div
+                              v-for="(video, idx) in group.items"
+                              :key="`${group.label}-${video.url || video.title || idx}`"
+                              class="rounded-xl p-2 ai-candidate-card flex flex-col"
+                            >
+                              <div class="rounded-lg overflow-hidden ai-candidate-cover mb-2 relative">
+                                <button
+                                  type="button"
+                                  class="ai-candidate-cover__trigger"
+                                  @click="openCandidateFullscreen(video)"
+                                >
+                                  <img
+                                    v-if="videoCoverUrl(video)"
+                                    :src="videoCoverUrl(video) || undefined"
+                                    alt="视频封面"
+                                    class="w-full aspect-video object-cover"
+                                    loading="lazy"
+                                    referrerpolicy="no-referrer"
+                                  />
+                                  <div v-else class="w-full aspect-video flex items-center justify-center text-xs opacity-60">
+                                    暂无封面
+                                  </div>
+                                </button>
+                                <button
+                                  v-if="canPreviewCandidate(video)"
+                                  type="button"
+                                  class="ai-candidate-cover__fullscreen"
+                                  title="全屏预览"
+                                  @click.stop="openCandidateFullscreen(video)"
+                                >
+                                  全屏
+                                </button>
+                              </div>
+                              <div class="text-xs font-semibold leading-[1.45] break-words ai-candidate-card__title line-clamp-2">
+                                {{ candidateDisplayTitle(video, idx) }}
+                              </div>
+                              <div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] ai-candidate-card__meta">
+                                <span v-if="video.up">{{ String(video.up) }}</span>
+                                <span v-if="video.duration">{{ String(video.duration) }}</span>
+                              </div>
+                              <div v-if="candidateStatItems(video).length" class="mt-1 flex flex-wrap gap-1">
+                                <span
+                                  v-for="(it, statIdx) in candidateStatItems(video)"
+                                  :key="`${group.label}-${idx}-${statIdx}-${it.label}-${it.value}`"
+                                  class="inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] ai-candidate-chip"
+                                >
+                                  {{ it.label }} {{ it.value }}
+                                </span>
+                              </div>
+                              <div class="mt-2 flex items-center justify-end">
+                                <n-space size="small">
                                   <n-button size="tiny" secondary :disabled="!canOpenVideoUrl(video)" @click="openVideoUrl(video)">
                                     打开原视频
                                   </n-button>
                                   <n-button size="tiny" secondary :disabled="!canPreviewCandidate(video)" @click="openCandidateFullscreen(video)">
                                     全屏预览
                                   </n-button>
-                                </div>
+                                  <n-button
+                                    size="tiny"
+                                    type="primary"
+                                    @click="summarizeWorkflowResource(video)"
+                                    :loading="isSelectingWorkflowResource(video)"
+                                    :disabled="!String(video.url || '').trim() || !chatSessionUuid"
+                                  >
+                                    总结笔记
+                                  </n-button>
+                                </n-space>
                               </div>
                             </div>
                           </div>
                         </div>
-                        <div v-if="msg.agentWorkflowStateKey" class="mt-3 flex justify-end">
-                          <n-button
-                            size="tiny"
-                            quaternary
-                            type="primary"
-                            :loading="workflowReplayLoading('chat', msg.agentWorkflowStateKey)"
-                            @click="toggleMessageWorkflowReplay(msg)"
-                          >
-                            {{ workflowReplayOpen('chat', msg.agentWorkflowStateKey) ? '收起完整回放' : '回放完整任务链' }}
-                          </n-button>
-                        </div>
-                        <div v-if="msg.agentWorkflowStateKey && workflowReplayOpen('chat', msg.agentWorkflowStateKey)" class="mt-3">
-                          <n-spin :show="workflowReplayLoading('chat', msg.agentWorkflowStateKey)">
+                      </div>
+                    </div>
+
+                    <div
+                      v-else-if="msg.role === 'assistant' && workflowResourceCardGroups(msg.agentWorkflow).length"
+                      class="mt-3 px-1"
+                    >
+                      <div class="rounded-2xl p-3 knowledge-hit-panel">
+                        <div class="text-xs opacity-70 mb-2">推荐资源</div>
+                        <div
+                          v-for="group in workflowResourceCardGroups(msg.agentWorkflow)"
+                          :key="group.label"
+                          class="mb-3"
+                        >
+                          <div class="text-[11px] font-medium mb-1">{{ group.label }}</div>
+                          <div class="grid grid-cols-2 gap-2">
                             <div
-                              v-if="workflowReplayRecord('chat', msg.agentWorkflowStateKey)"
-                              class="rounded-xl border border-slate-200/70 p-3 bg-white/70 space-y-3"
+                              v-for="(video, idx) in group.items"
+                              :key="`${group.label}-${video.url || video.title || idx}`"
+                              class="rounded-xl p-2 ai-candidate-card flex flex-col"
                             >
-                              <div class="text-[11px] opacity-70 break-words">
-                                记录键：{{ workflowReplayRecord('chat', msg.agentWorkflowStateKey)?.state_key }}
-                              </div>
-                              <div class="grid grid-cols-1 gap-1 text-[11px] opacity-80">
-                                <div v-if="workflowReplayRecord('chat', msg.agentWorkflowStateKey)?.updated_at">
-                                  更新时间：{{ workflowReplayRecord('chat', msg.agentWorkflowStateKey)?.updated_at }}
-                                </div>
-                                <div v-if="workflowReplayRecord('chat', msg.agentWorkflowStateKey)?.finished_at">
-                                  结束时间：{{ workflowReplayRecord('chat', msg.agentWorkflowStateKey)?.finished_at }}
-                                </div>
-                              </div>
-                              <div v-if="workflowReplayArtifactsPreview(workflowReplayRecord('chat', msg.agentWorkflowStateKey)).length">
-                                <div class="text-xs opacity-70 mb-1">运行态摘要</div>
-                                <div
-                                  v-for="row in workflowReplayArtifactsPreview(workflowReplayRecord('chat', msg.agentWorkflowStateKey))"
-                                  :key="`${msg.localId}-${row.label}`"
-                                  class="text-[11px] leading-5 break-words"
+                              <div class="rounded-lg overflow-hidden ai-candidate-cover mb-2 relative">
+                                <button
+                                  type="button"
+                                  class="ai-candidate-cover__trigger"
+                                  @click="openCandidateFullscreen(video)"
                                 >
-                                  <span class="font-medium">{{ row.label }}：</span>{{ row.value }}
-                                </div>
-                              </div>
-                              <div>
-                                <div class="text-xs opacity-70 mb-2">完整任务图</div>
-                                <div class="space-y-2 max-h-72 overflow-auto pr-1">
-                                  <div
-                                    v-for="task in workflowAllTasks(workflowReplayRecord('chat', msg.agentWorkflowStateKey)?.workflow)"
-                                    :key="`${msg.localId}-${task.task_id}`"
-                                    class="rounded-xl border border-slate-200/70 px-2 py-2"
-                                  >
-                                    <div class="flex items-center justify-between gap-2">
-                                      <div class="text-xs font-medium break-words">{{ task.task_name || task.task_id }}</div>
-                                      <n-tag size="tiny" :type="String(task.status || '') === 'completed' ? 'success' : String(task.status || '') === 'failed' ? 'error' : 'default'">
-                                        {{ workflowStatusLabel(task.status) }}
-                                      </n-tag>
-                                    </div>
-                                    <div class="text-[11px] opacity-70 mt-1 break-words">
-                                      {{ task.summary_for_ui || task.task_goal || '等待执行' }}
-                                    </div>
+                                  <img
+                                    v-if="videoCoverUrl(video)"
+                                    :src="videoCoverUrl(video) || undefined"
+                                    alt="视频封面"
+                                    class="w-full aspect-video object-cover"
+                                    loading="lazy"
+                                    referrerpolicy="no-referrer"
+                                  />
+                                  <div v-else class="w-full aspect-video flex items-center justify-center text-xs opacity-60">
+                                    暂无封面
                                   </div>
-                                </div>
+                                </button>
+                                <button
+                                  v-if="canPreviewCandidate(video)"
+                                  type="button"
+                                  class="ai-candidate-cover__fullscreen"
+                                  title="全屏预览"
+                                  @click.stop="openCandidateFullscreen(video)"
+                                >
+                                  全屏
+                                </button>
                               </div>
-                              <div v-if="workflowAllTraces(workflowReplayRecord('chat', msg.agentWorkflowStateKey)?.workflow).length">
-                                <div class="text-xs opacity-70 mb-2">完整执行轨迹</div>
-                                <div class="space-y-2 max-h-72 overflow-auto pr-1">
-                                  <div
-                                    v-for="trace in workflowAllTraces(workflowReplayRecord('chat', msg.agentWorkflowStateKey)?.workflow)"
-                                    :key="`${msg.localId}-${trace.task_id}-${trace.ts || ''}`"
-                                    class="rounded-xl border border-slate-200/70 px-2 py-2"
-                                  >
-                                    <div class="text-xs font-medium break-words">{{ trace.task_id }}</div>
-                                    <div class="text-[11px] opacity-70 mt-1 break-words">
-                                      {{ trace.compressed_result?.key_result || trace.compressed_result?.what_was_done || workflowStatusLabel(trace.status) }}
-                                    </div>
-                                  </div>
-                                </div>
+                              <div class="text-xs font-semibold leading-[1.45] break-words ai-candidate-card__title line-clamp-2">
+                                {{ candidateDisplayTitle(video, idx) }}
                               </div>
-                              <div v-if="workflowAllErrors(workflowReplayRecord('chat', msg.agentWorkflowStateKey)?.workflow).length">
-                                <div class="text-xs opacity-70 mb-2">错误恢复</div>
-                                <div class="space-y-2 max-h-56 overflow-auto pr-1">
-                                  <div
-                                    v-for="row in workflowAllErrors(workflowReplayRecord('chat', msg.agentWorkflowStateKey)?.workflow)"
-                                    :key="`${msg.localId}-${row.task_id || 'err'}-${row.ts || ''}`"
-                                    class="rounded-xl border border-red-200/70 px-2 py-2"
-                                  >
-                                    <div class="text-xs font-medium">{{ row.task_id || '系统错误' }}</div>
-                                    <div class="text-[11px] opacity-80 break-words mt-1">{{ row.error_message || row.error_type || '未知错误' }}</div>
-                                    <div v-if="row.recovery_action" class="text-[11px] opacity-70 mt-1">恢复：{{ row.recovery_action }}</div>
-                                  </div>
-                                </div>
+                              <div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] ai-candidate-card__meta">
+                                <span v-if="video.up">{{ String(video.up) }}</span>
+                                <span v-if="video.duration">{{ String(video.duration) }}</span>
+                              </div>
+                              <div v-if="candidateStatItems(video).length" class="mt-1 flex flex-wrap gap-1">
+                                <span
+                                  v-for="(it, statIdx) in candidateStatItems(video)"
+                                  :key="`${group.label}-${idx}-${statIdx}-${it.label}-${it.value}`"
+                                  class="inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] ai-candidate-chip"
+                                >
+                                  {{ it.label }} {{ it.value }}
+                                </span>
+                              </div>
+                              <div class="mt-2 flex items-center justify-end gap-1">
+                                <n-button size="tiny" secondary :disabled="!canOpenVideoUrl(video)" @click="openVideoUrl(video)">
+                                  打开原视频
+                                </n-button>
+                                <n-button size="tiny" secondary :disabled="!canPreviewCandidate(video)" @click="openCandidateFullscreen(video)">
+                                  全屏预览
+                                </n-button>
+                                <n-button
+                                  size="tiny"
+                                  type="primary"
+                                  @click="summarizeWorkflowResource(video)"
+                                  :loading="isSelectingWorkflowResource(video)"
+                                  :disabled="!String(video.url || '').trim() || !chatSessionUuid"
+                                >
+                                  总结笔记
+                                </n-button>
                               </div>
                             </div>
-                          </n-spin>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -779,26 +866,29 @@
           <template #header>
             <div class="flex items-center justify-between">
               <span class="font-semibold">Agent</span>
-              <n-tag size="small" :type="tagType(currentSnapshot?.status)">
+              <n-tag v-if="jobsStore.currentJobId" size="small" :type="tagType(currentSnapshot?.status)">
                 {{ statusLabel(currentSnapshot?.status) }}
+              </n-tag>
+              <n-tag v-else-if="currentRailWorkflow" size="small" type="info">
+                {{ workflowStatusLabel(currentRailWorkflow?.master_plan?.workflow_status) }}
               </n-tag>
             </div>
           </template>
 
-          <template v-if="jobsStore.currentJobId">
+          <template v-if="jobsStore.currentJobId || currentRailWorkflow">
             <div class="h-full min-h-0 flex flex-col gap-3 overflow-auto pr-1 right-rail-scroll">
-              <div class="rail-section rail-section--meta">
+              <div v-if="jobsStore.currentJobId" class="rail-section rail-section--meta">
                 <div class="text-xs opacity-70 mb-1">当前任务ID</div>
                 <div class="font-mono text-xs break-all">{{ jobsStore.currentJobId }}</div>
               </div>
 
-              <div class="rail-section rail-section--stage">
+              <div v-if="jobsStore.currentJobId" class="rail-section rail-section--stage">
                 <div class="text-xs opacity-70 mb-1">正在进行的步骤</div>
                 <div class="font-medium">{{ humanizeStage(currentSnapshot?.stage || '') || '等待中' }}</div>
                 <div class="text-xs opacity-70 mt-1">{{ humanizeDetail(currentSnapshot?.detail || '', currentSnapshot?.stage || '') || '系统将自动更新' }}</div>
               </div>
 
-              <div class="rail-section rail-section--actions">
+              <div v-if="jobsStore.currentJobId" class="rail-section rail-section--actions">
                 <div class="text-xs opacity-70 mb-1">快捷操作</div>
                 <n-space vertical>
                   <n-button block @click="refreshCurrentJob" :disabled="!jobsStore.currentJobId">刷新当前任务</n-button>
@@ -887,7 +977,7 @@
                 </div>
               </div>
 
-              <div v-if="currentJobWorkflow || jobsStore.currentJobId" class="rail-section rail-section--plain">
+              <div v-if="currentRailWorkflow" class="rail-section rail-section--plain">
                 <div class="flex items-center justify-between gap-2 mb-2">
                   <div class="text-xs opacity-70">Agent 工作流</div>
                   <div class="flex items-center gap-2">
@@ -902,29 +992,29 @@
                       {{ workflowReplayOpen('job', jobsStore.currentJobId) ? '收起完整回放' : '回放完整任务链' }}
                     </n-button>
                     <n-tag size="small" type="info">
-                      {{ workflowStatusLabel(currentJobWorkflow?.master_plan?.workflow_status) }}
+                      {{ workflowStatusLabel(currentRailWorkflow?.master_plan?.workflow_status) }}
                     </n-tag>
                   </div>
                 </div>
                 <div class="rail-subpanel p-2 space-y-3">
-                  <div v-if="workflowCurrentStage(currentJobWorkflow)" class="text-xs">
+                  <div v-if="workflowCurrentStage(currentRailWorkflow)" class="text-xs">
                     <span class="opacity-60">当前阶段：</span>
-                    <span class="font-medium">{{ workflowCurrentStage(currentJobWorkflow) }}</span>
+                    <span class="font-medium">{{ workflowCurrentStage(currentRailWorkflow) }}</span>
                   </div>
-                  <div v-if="workflowDecisionText(currentJobWorkflow)" class="text-xs leading-5 break-words">
+                  <div v-if="workflowDecisionText(currentRailWorkflow)" class="text-xs leading-5 break-words">
                     <span class="opacity-60">主决策：</span>
-                    <span>{{ workflowDecisionText(currentJobWorkflow) }}</span>
+                    <span>{{ workflowDecisionText(currentRailWorkflow) }}</span>
                   </div>
                   <div>
                     <div class="text-xs opacity-70 mb-2">任务图</div>
                     <div class="space-y-2">
                       <div
-                        v-for="task in workflowTaskPreview(currentJobWorkflow)"
+                        v-for="task in workflowTaskPreview(currentRailWorkflow)"
                         :key="task.task_id"
                         class="rounded-xl border border-slate-200/60 px-2 py-2"
                       >
                         <div class="flex items-center justify-between gap-2">
-                          <div class="text-xs font-medium break-words">{{ task.task_name || task.task_id }}</div>
+                          <div class="text-xs font-medium break-words">{{ workflowTaskDisplayName(task) }}</div>
                           <n-tag size="tiny" :type="String(task.status || '') === 'completed' ? 'success' : String(task.status || '') === 'failed' ? 'error' : 'default'">
                             {{ workflowStatusLabel(task.status) }}
                           </n-tag>
@@ -935,29 +1025,29 @@
                       </div>
                     </div>
                   </div>
-                  <div v-if="workflowRecentTrace(currentJobWorkflow).length">
+                  <div v-if="workflowRecentTrace(currentRailWorkflow).length">
                     <div class="text-xs opacity-70 mb-2">最近执行</div>
                     <div class="space-y-2">
                       <div
-                        v-for="trace in workflowRecentTrace(currentJobWorkflow)"
+                        v-for="trace in workflowRecentTrace(currentRailWorkflow)"
                         :key="`${trace.task_id}-${trace.ts || ''}`"
                         class="rounded-xl border border-slate-200/60 px-2 py-2"
                       >
-                        <div class="text-xs font-medium">{{ trace.task_id }}</div>
+                        <div class="text-xs font-medium">{{ workflowIdentifierLabel(trace.task_id) || '执行步骤' }}</div>
                         <div class="text-[11px] opacity-70 break-words mt-1">
                           {{ trace.compressed_result?.key_result || trace.compressed_result?.what_was_done || workflowStatusLabel(trace.status) }}
                         </div>
                       </div>
                     </div>
                   </div>
-                  <div v-if="workflowErrorPreview(currentJobWorkflow).length">
+                  <div v-if="workflowErrorPreview(currentRailWorkflow).length">
                     <div class="text-xs opacity-70 mb-2">错误恢复</div>
                     <div
-                      v-for="row in workflowErrorPreview(currentJobWorkflow)"
+                      v-for="row in workflowErrorPreview(currentRailWorkflow)"
                       :key="`${row.task_id || 'err'}-${row.ts || ''}`"
                       class="rounded-xl border border-red-200/70 px-2 py-2"
                     >
-                      <div class="text-xs font-medium">{{ row.task_id || '系统错误' }}</div>
+                      <div class="text-xs font-medium">{{ workflowIdentifierLabel(row.task_id) || '系统错误' }}</div>
                       <div class="text-[11px] opacity-80 break-words mt-1">{{ row.error_message || row.error_type || '未知错误' }}</div>
                       <div v-if="row.recovery_action" class="text-[11px] opacity-70 mt-1">恢复：{{ row.recovery_action }}</div>
                     </div>
@@ -998,7 +1088,7 @@
                               class="rounded-xl border border-slate-200/70 px-2 py-2"
                             >
                               <div class="flex items-center justify-between gap-2">
-                                <div class="text-xs font-medium break-words">{{ task.task_name || task.task_id }}</div>
+                                <div class="text-xs font-medium break-words">{{ workflowTaskDisplayName(task) }}</div>
                                 <n-tag size="tiny" :type="String(task.status || '') === 'completed' ? 'success' : String(task.status || '') === 'failed' ? 'error' : 'default'">
                                   {{ workflowStatusLabel(task.status) }}
                                 </n-tag>
@@ -1017,7 +1107,7 @@
                               :key="`job-${jobsStore.currentJobId}-${trace.task_id}-${trace.ts || ''}`"
                               class="rounded-xl border border-slate-200/70 px-2 py-2"
                             >
-                              <div class="text-xs font-medium">{{ trace.task_id }}</div>
+                              <div class="text-xs font-medium">{{ workflowIdentifierLabel(trace.task_id) || '执行步骤' }}</div>
                               <div class="text-[11px] opacity-70 mt-1 break-words">
                                 {{ trace.compressed_result?.key_result || trace.compressed_result?.what_was_done || workflowStatusLabel(trace.status) }}
                               </div>
@@ -1032,7 +1122,7 @@
                               :key="`job-${jobsStore.currentJobId}-${row.task_id || 'err'}-${row.ts || ''}`"
                               class="rounded-xl border border-red-200/70 px-2 py-2"
                             >
-                              <div class="text-xs font-medium">{{ row.task_id || '系统错误' }}</div>
+                              <div class="text-xs font-medium">{{ workflowIdentifierLabel(row.task_id) || '系统错误' }}</div>
                               <div class="text-[11px] opacity-80 break-words mt-1">{{ row.error_message || row.error_type || '未知错误' }}</div>
                               <div v-if="row.recovery_action" class="text-[11px] opacity-70 mt-1">恢复：{{ row.recovery_action }}</div>
                             </div>
@@ -1279,6 +1369,16 @@ type UiChatMessage = {
   agentWorkflow?: AgentWorkflow | null
 }
 
+type WorkflowLearningPathSection = {
+  stepIndex: number
+  stageId: string
+  title: string
+  goal: string
+  why: string
+  practiceHint: string
+  items: TopicSelectedVideo[]
+}
+
 const router = useRouter()
 const route = useRoute()
 const message = useMessage()
@@ -1324,7 +1424,8 @@ const candidatePageState = ref<Record<string, number>>({})
 const workflowReplayOpenState = ref<Record<string, boolean>>({})
 const workflowReplayLoadingState = ref<Record<string, boolean>>({})
 const workflowReplayRecords = ref<Record<string, AgentWorkflowStateItem | null>>({})
-const taskRailOpen = ref(true)
+const taskRailOpen = ref(false)
+const taskRailAutoOpened = ref(false)
 const quoteContextMenu = ref({
   visible: false,
   x: 0,
@@ -1352,6 +1453,19 @@ const currentJobWorkflow = computed(() =>
     || currentSnapshot.value?.agent_workflow
     || ((currentSnapshot.value?.result as any)?.agent_workflow ?? null)
     || null) as AgentWorkflow | null,
+)
+const latestChatAgentWorkflow = computed(() => {
+  for (let idx = messages.value.length - 1; idx >= 0; idx -= 1) {
+    const msg = messages.value[idx]
+    if (!msg || msg.role !== 'assistant') continue
+    if (workflowHasPlan(msg.agentWorkflow)) return msg.agentWorkflow || null
+  }
+  return null
+})
+const currentRailWorkflow = computed(() =>
+  workflowHasPlan(currentJobWorkflow.value)
+    ? currentJobWorkflow.value
+    : (workflowHasPlan(latestChatAgentWorkflow.value) ? latestChatAgentWorkflow.value : null),
 )
 const uploadingComposerImages = computed(() =>
   composerImages.value.some((img) => img.uploadStatus === 'uploading'),
@@ -1414,7 +1528,8 @@ const selectedModelDisplayName = computed(() => {
   return model?.display_name || model?.model_name || selectedModel.value
 })
 
-const showTaskRail = computed(() => taskRailOpen.value)
+const hasTaskRailContent = computed(() => workflowHasPlan(currentRailWorkflow.value))
+const showTaskRail = computed(() => taskRailOpen.value && hasTaskRailContent.value)
 const pasteShortcutLabel = computed(() => (isMacLikePlatform.value ? '⌘V' : 'Ctrl+V'))
 
 const selectedSearchModes = computed(() => {
@@ -1489,6 +1604,91 @@ function workflowStatusLabel(status?: string) {
   return '待执行'
 }
 
+const WORKFLOW_IDENTIFIER_LABELS: Record<string, string> = {
+  T_ANALYZE_INTENT: '识别用户意图',
+  T_BUILD_PLAN: '生成任务计划',
+  T_CREATE_LONG_TASK: '创建长任务',
+  T_SEARCH_NETWORK: '联网检索',
+  T_SEARCH_BILI: '检索 B站资源',
+  T_SEARCH_DOUYIN: '检索抖音资源',
+  T_GROUP_RESOURCES: '整理推荐资源',
+  T_FINALIZE_OUTPUT: '生成最终输出',
+  T_BUILD_LEARNING_PATH: '构建学习路径',
+  T_SEARCH_STAGE_RESOURCES_BILI: '分阶段检索 B站资源',
+  T_SEARCH_STAGE_RESOURCES_NETWORK: '分阶段联网检索',
+  T_CLARIFY_REQUIREMENTS: '澄清关键信息',
+  T_PREPARE_MEDIA: '准备媒体素材',
+  T_SPLIT_AUDIO: '拆分音频',
+  T_ASR_PIPELINE: '语音转写',
+  T_NOTE_PIPELINE: '生成笔记',
+  T_FINAL_MERGE: '合并最终结果',
+  AWAITING_CLARIFICATION: '等待澄清信息',
+  FINALIZE_OUTPUT: '生成最终输出',
+  JOB_STARTED: '任务已启动',
+  BUILD_LEARNING_PATH: '构建学习路径',
+  GROUP_RESOURCES: '整理推荐资源',
+  COMPLETED: '已完成',
+  RUNNING: '进行中',
+  FAILED: '失败',
+  RETRYING: '重试中',
+  BLOCKED: '阻塞',
+  DEGRADED: '降级执行',
+  PENDING: '待执行',
+}
+
+function hasChineseText(text?: string) {
+  return /[\u3400-\u9fff]/.test(String(text || ''))
+}
+
+function workflowIdentifierLabel(identifier?: string) {
+  const raw = String(identifier || '').trim()
+  if (!raw) return ''
+  if (hasChineseText(raw)) return raw
+  const normalized = raw.toUpperCase()
+  if (WORKFLOW_IDENTIFIER_LABELS[normalized]) return WORKFLOW_IDENTIFIER_LABELS[normalized]
+
+  let match = normalized.match(/^ASR_CHUNK_(\d+)$/)
+  if (match?.[1]) return `第 ${Number(match[1])} 段语音转写`
+  match = normalized.match(/^TERM_FIX_CHUNK_(\d+)$/)
+  if (match?.[1]) return `第 ${Number(match[1])} 段术语修正`
+  match = normalized.match(/^VISION_DECIDE_CHUNK_(\d+)$/)
+  if (match?.[1]) return `第 ${Number(match[1])} 段画面判断`
+  match = normalized.match(/^NOTE_CHUNK_(\d+)$/)
+  if (match?.[1]) return `第 ${Number(match[1])} 段笔记生成`
+  match = normalized.match(/^MERGE_CONTIGUOUS_(\d+)_(\d+)$/)
+  if (match?.[1] && match?.[2]) return `合并第 ${Number(match[1])}-${Number(match[2])} 段结果`
+
+  if (/^T_[A-Z0-9_]+$/.test(normalized)) return '任务步骤'
+  if (/^[A-Z0-9_]+$/.test(normalized)) return '执行步骤'
+  return raw
+}
+
+function workflowTaskDisplayName(task?: { task_name?: string; task_id?: string } | null) {
+  const taskName = String(task?.task_name || '').trim()
+  if (hasChineseText(taskName)) return taskName
+  const mappedName = workflowIdentifierLabel(taskName)
+  if (mappedName && mappedName !== '执行步骤' && mappedName !== '任务步骤') return mappedName
+  return workflowIdentifierLabel(task?.task_id) || '任务步骤'
+}
+
+function workflowHasPlan(workflow?: AgentWorkflow | null) {
+  if (!workflow || typeof workflow !== 'object') return false
+  const taskCount = Array.isArray(workflow.task_graph) ? workflow.task_graph.filter(Boolean).length : 0
+  if (taskCount > 0) return true
+  const traceCount = Array.isArray(workflow.execution_trace) ? workflow.execution_trace.filter(Boolean).length : 0
+  if (traceCount > 0) return true
+  if (String(workflow.master_plan?.current_stage || '').trim()) return true
+  if (String(workflow.master_decision?.decision || workflow.master_decision?.reason || '').trim()) return true
+  return false
+}
+
+function maybeAutoOpenTaskRail(workflow?: AgentWorkflow | null) {
+  if (taskRailAutoOpened.value) return
+  if (!workflowHasPlan(workflow)) return
+  taskRailOpen.value = true
+  taskRailAutoOpened.value = true
+}
+
 function workflowTaskPreview(workflow?: AgentWorkflow | null) {
   const rows = Array.isArray(workflow?.task_graph) ? workflow!.task_graph! : []
   return rows.slice(0, 8)
@@ -1519,7 +1719,117 @@ function workflowResourceToVideo(item: Record<string, any>): TopicSelectedVideo 
     duration: String(item.duration || '').trim(),
     stats: String(item.stats || '').trim(),
     platform: String(item.platform || '').trim(),
+    learning_stage: String(item.learning_stage || '').trim(),
+    recommended_reason: String(item.recommended_reason || '').trim(),
+    resource_group_type: String(item.resource_group_type || '').trim(),
+    resource_type: String(item.resource_type || '').trim(),
+    recommended_priority: Number(item.recommended_priority || 0) || 0,
+    is_playlist: Boolean(item.is_playlist),
   } as TopicSelectedVideo
+}
+
+function workflowLearningPath(workflow?: AgentWorkflow | null) {
+  const attachments = Array.isArray(workflow?.final_output?.attachments) ? workflow!.final_output!.attachments! : []
+  for (const row of attachments) {
+    if (!row || typeof row !== 'object') continue
+    if (String((row as any).kind || '').trim() !== 'learning_path') continue
+    const value = (row as any).value
+    if (value && typeof value === 'object') return value as Record<string, any>
+  }
+  return null
+}
+
+function workflowAllResourceVideos(workflow?: AgentWorkflow | null) {
+  const grouped = workflow?.resource_recommendations || {}
+  const out: TopicSelectedVideo[] = []
+  const seen = new Set<string>()
+  const appendRows = (rows: unknown[]) => {
+    for (const row of rows) {
+      if (!row || typeof row !== 'object') continue
+      const v = workflowResourceToVideo(row as Record<string, any>)
+      if (!v) continue
+      const key = [
+        String((v as any).page_url || v.url || v.title || '').trim().toLowerCase(),
+        String((v as any).learning_stage || '').trim().toLowerCase(),
+        String((v as any).resource_group_type || '').trim().toLowerCase(),
+      ].join('@@')
+      if (!key || seen.has(key)) continue
+      seen.add(key)
+      out.push(v)
+    }
+  }
+  appendRows(Array.isArray((grouped as any).playlists) ? (grouped as any).playlists : [])
+  appendRows(Array.isArray((grouped as any).single_videos) ? (grouped as any).single_videos : [])
+  appendRows(Array.isArray((grouped as any).courses) ? (grouped as any).courses : [])
+  return out.sort((a, b) => {
+    const pa = Number((a as any).recommended_priority || 999)
+    const pb = Number((b as any).recommended_priority || 999)
+    if (pa !== pb) return pa - pb
+    const ga = String((a as any).resource_group_type || '').trim()
+    const gb = String((b as any).resource_group_type || '').trim()
+    if (ga !== gb) {
+      const order = { playlist: 1, course: 2, single_video: 3 } as Record<string, number>
+      return (order[ga] || 99) - (order[gb] || 99)
+    }
+    return String(a.title || '').localeCompare(String(b.title || ''), 'zh-Hans-CN')
+  })
+}
+
+function workflowLearningPathSections(workflow?: AgentWorkflow | null): WorkflowLearningPathSection[] {
+  const learningPath = workflowLearningPath(workflow)
+  const stages = Array.isArray(learningPath?.stages) ? learningPath!.stages : []
+  if (!stages.length) return []
+  const videos = workflowAllResourceVideos(workflow)
+  const out: WorkflowLearningPathSection[] = []
+  for (const [idx, stage] of stages.entries()) {
+    if (!stage || typeof stage !== 'object') continue
+    const title = String((stage as any).title || '').trim()
+    if (!title) continue
+    const items = videos.filter((video) => String((video as any).learning_stage || '').trim() === title)
+    out.push({
+        stepIndex: idx + 1,
+        stageId: String((stage as any).stage_id || `LP${idx + 1}`).trim(),
+        title,
+        goal: String((stage as any).goal || '').trim(),
+        why: String((stage as any).why || '').trim(),
+        practiceHint: String((stage as any).practice_hint || '').trim(),
+        items,
+      })
+  }
+  return out
+}
+
+function workflowSupplementalResourceCardGroups(workflow?: AgentWorkflow | null) {
+  const sections = workflowLearningPathSections(workflow)
+  const used = new Set<string>()
+  for (const section of sections) {
+    for (const item of Array.isArray(section.items) ? section.items : []) {
+      const key = [
+        String((item as any).page_url || item.url || item.title || '').trim().toLowerCase(),
+        String((item as any).learning_stage || '').trim().toLowerCase(),
+        String((item as any).resource_group_type || '').trim().toLowerCase(),
+      ].join('@@')
+      if (key) used.add(key)
+    }
+  }
+  const extras = workflowAllResourceVideos(workflow).filter((video) => {
+    const key = [
+      String((video as any).page_url || video.url || video.title || '').trim().toLowerCase(),
+      String((video as any).learning_stage || '').trim().toLowerCase(),
+      String((video as any).resource_group_type || '').trim().toLowerCase(),
+    ].join('@@')
+    return key && !used.has(key)
+  })
+  const grouped = {
+    playlists: extras.filter((video) => String((video as any).resource_group_type || '').trim() === 'playlist'),
+    single_videos: extras.filter((video) => String((video as any).resource_group_type || '').trim() === 'single_video'),
+    courses: extras.filter((video) => String((video as any).resource_group_type || '').trim() === 'course'),
+  }
+  return [
+    { label: '补充视频合集', items: grouped.playlists.slice(0, 4) },
+    { label: '补充单视频', items: grouped.single_videos.slice(0, 6) },
+    { label: '补充课程专题', items: grouped.courses.slice(0, 4) },
+  ].filter((row) => row.items.length)
 }
 
 function workflowResourceCardGroups(workflow?: AgentWorkflow | null) {
@@ -1531,7 +1841,10 @@ function workflowResourceCardGroups(workflow?: AgentWorkflow | null) {
       if (!row || typeof row !== 'object') continue
       const v = workflowResourceToVideo(row as Record<string, any>)
       if (!v) continue
-      const key = String((v as any).page_url || v.url || v.title || '').trim().toLowerCase()
+      const key = [
+        String((v as any).page_url || v.url || v.title || '').trim().toLowerCase(),
+        String((v as any).learning_stage || '').trim().toLowerCase(),
+      ].join('@@')
       if (!key || seen.has(key)) continue
       seen.add(key)
       out.push(v)
@@ -1551,7 +1864,7 @@ function workflowDecisionText(workflow?: AgentWorkflow | null) {
 }
 
 function workflowCurrentStage(workflow?: AgentWorkflow | null) {
-  return String(workflow?.master_plan?.current_stage || '').trim()
+  return workflowIdentifierLabel(workflow?.master_plan?.current_stage) || ''
 }
 
 function workflowAllTasks(workflow?: AgentWorkflow | null) {
@@ -2161,6 +2474,7 @@ function assistantProgressLine(msg: UiChatMessage) {
 }
 
 function toggleTaskRail() {
+  if (!hasTaskRailContent.value) return
   taskRailOpen.value = !taskRailOpen.value
 }
 
@@ -2236,6 +2550,14 @@ watch(
     if (!jobId || status !== 'completed') return
     await loadCurrentJobNoteAssets({ silent: true })
   },
+)
+
+watch(
+  () => currentRailWorkflow.value,
+  (workflow) => {
+    maybeAutoOpenTaskRail(workflow)
+  },
+  { immediate: true },
 )
 
 function isActiveJobStatus(status: string) {
@@ -2334,7 +2656,8 @@ function startNewConversation() {
   retrievalModeNetwork.value = true
   retrievalModeBili.value = false
   retrievalModeDouyin.value = false
-  taskRailOpen.value = true
+  taskRailOpen.value = false
+  taskRailAutoOpened.value = false
   activeSearchTaskLogs.value = []
   videoPreviewState.value = {}
   closeCandidateFullscreen()
@@ -2364,7 +2687,17 @@ async function ensureChatSession() {
 
 async function loadSessionFromRoute(sessionUuidFromRoute: string) {
   const sessionUuid = (sessionUuidFromRoute || '').trim()
-  if (!sessionUuid) return
+  if (!sessionUuid) {
+    resetCurrentTaskState()
+    chatStore.clearCurrentSession()
+    chatSessionUuid.value = ''
+    messages.value = []
+    loadingSessionMessages.value = false
+    candidatePageState.value = {}
+    taskRailOpen.value = false
+    taskRailAutoOpened.value = false
+    return
+  }
   if (route.query.newChat) return
   if (skipNextRouteSessionHydrateUuid.value && skipNextRouteSessionHydrateUuid.value === sessionUuid) {
     skipNextRouteSessionHydrateUuid.value = ''
@@ -2384,6 +2717,9 @@ async function loadSessionFromRoute(sessionUuidFromRoute: string) {
       chatSessionUuid.value = sessionUuid
       messages.value = cachedMessages
       candidatePageState.value = {}
+      taskRailOpen.value = false
+      taskRailAutoOpened.value = false
+      maybeAutoOpenTaskRail(latestChatAgentWorkflow.value)
       await syncCurrentJobRuntime({ forceReconnect: true, silent: true })
       return
     }
@@ -2393,6 +2729,8 @@ async function loadSessionFromRoute(sessionUuidFromRoute: string) {
     loadingSessionMessages.value = true
     messages.value = []
     candidatePageState.value = {}
+    taskRailOpen.value = false
+    taskRailAutoOpened.value = false
     chatStore.setCurrentSession(sessionUuid)
     chatSessionUuid.value = sessionUuid
     const res = await listChatMessagesApi(sessionUuid, 100)
@@ -2434,6 +2772,7 @@ async function loadSessionFromRoute(sessionUuidFromRoute: string) {
     }))
     messages.value = loaded
     cacheSessionMessages(sessionUuid, loaded)
+    maybeAutoOpenTaskRail(latestChatAgentWorkflow.value)
 
     const taskJobIds = loaded
       .filter((m) => m.role === 'assistant' && m.task?.job_id)
@@ -2711,6 +3050,7 @@ async function sendMessage() {
           pendingAssistant.agentWorkflowStateKey =
             String((meta as any)?.agent_workflow_state_key || '').trim() || pendingAssistant.agentWorkflowStateKey
           pendingAssistant.agentWorkflow = ((meta?.agent_workflow as AgentWorkflow | null) || pendingAssistant.agentWorkflow || null)
+          maybeAutoOpenTaskRail(pendingAssistant.agentWorkflow)
           if (Array.isArray(meta?.search_modes)) {
             const modes = (meta.search_modes as string[]).map((x) => String(x || '').toLowerCase())
             retrievalModeNetwork.value = modes.includes('network')
@@ -2806,14 +3146,14 @@ async function sendMessage() {
           }
           if ((msg?.meta as any)?.agent_workflow) {
             pendingAssistant.agentWorkflow = (msg?.meta as any).agent_workflow as AgentWorkflow
-            taskRailOpen.value = true
+            maybeAutoOpenTaskRail(pendingAssistant.agentWorkflow)
           }
         },
         onAgentUpdate: (data) => {
           const workflow = (data?.workflow || null) as AgentWorkflow | null
           if (workflow) {
             pendingAssistant.agentWorkflow = workflow
-            taskRailOpen.value = true
+            maybeAutoOpenTaskRail(workflow)
           }
         },
         onSearchLog: (data) => {
@@ -3272,6 +3612,14 @@ function isSelectingCandidateVideo(jobId: string, video: TopicSelectedVideo) {
   return Boolean(selectingVideoState.value[candidateSelectKey(jobId, video)])
 }
 
+function workflowResourceSelectKey(video: TopicSelectedVideo) {
+  return `workflow::${videoPreviewKey(video) || String(video.url || video.title || '')}`
+}
+
+function isSelectingWorkflowResource(video: TopicSelectedVideo) {
+  return Boolean(selectingVideoState.value[workflowResourceSelectKey(video)])
+}
+
 function selectedCandidateMap(jobId: string) {
   return candidateSelectionState.value[jobId] || {}
 }
@@ -3428,6 +3776,54 @@ async function selectCandidateVideo(parentJobId: string, video: TopicSelectedVid
     message.success('已加入任务队列，开始总结该视频笔记')
   } catch (e: any) {
     message.error(e?.message || '选择视频处理失败')
+  } finally {
+    const nextState = { ...selectingVideoState.value }
+    delete nextState[key]
+    selectingVideoState.value = nextState
+  }
+}
+
+async function summarizeWorkflowResource(video: TopicSelectedVideo) {
+  const sessionUuid = String(chatSessionUuid.value || '').trim()
+  const { pageUrl, rawUrl } = candidateVideoUrls(video)
+  const url = String(pageUrl || rawUrl || '').trim()
+  if (!sessionUuid) {
+    message.warning('当前会话不存在，无法创建总结任务')
+    return
+  }
+  if (!url) {
+    message.warning('该视频缺少可用链接')
+    return
+  }
+  const key = workflowResourceSelectKey(video)
+  if (selectingVideoState.value[key]) return
+  selectingVideoState.value = { ...selectingVideoState.value, [key]: true }
+  try {
+    const task = await jobsStore.createJob({
+      user_input: url,
+      pipeline_model_name: selectedModel.value || '',
+    })
+    chatStore.bindJobToSession(task.job_id, sessionUuid)
+    jobsStore.setCurrentJob(task.job_id)
+    knowledgeRetrievalEnabled.value = true
+    appendUiMessage({
+      role: 'assistant',
+      content: `已开始总结视频：${String(video.title || url)}。`,
+      task,
+      autoTask: true,
+    })
+    try {
+      await jobsStore.fetchJob(task.job_id)
+    } catch {
+      // ignore
+    }
+    jobsStore.connectJobEvents(task.job_id)
+    await nextTick()
+    const el = messagesContainerRef.value
+    if (el) el.scrollTop = el.scrollHeight
+    message.success('已创建总结任务，完成后会把笔记同步回当前对话')
+  } catch (e: any) {
+    message.error(e?.message || '创建总结任务失败')
   } finally {
     const nextState = { ...selectingVideoState.value }
     delete nextState[key]
