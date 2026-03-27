@@ -2991,6 +2991,36 @@ async function stopCurrentReply() {
   }
 }
 
+function buildPendingAssistantPlaceholder(autoTask: boolean, searchModes: string[]) {
+  if (!autoTask) return '我正在整理回复，请稍候。'
+  const modes = (searchModes || []).map((x) => String(x || '').trim().toLowerCase()).filter(Boolean)
+  const hasBili = modes.includes('bili')
+  const hasNetwork = modes.includes('network')
+  const hasDouyin = modes.includes('douyin')
+  if (hasBili && !hasNetwork && !hasDouyin) {
+    return '我正在为你规划学习路径，并检索 B 站相关视频，请稍候。'
+  }
+  if (hasNetwork && !hasBili && !hasDouyin) {
+    return '我正在联网检索并整理相关内容，请稍候。'
+  }
+  if (hasDouyin && !hasBili && !hasNetwork) {
+    return '我正在检索抖音相关内容并整理结果，请稍候。'
+  }
+  return '我正在规划任务并检索相关资源，请稍候。'
+}
+
+function buildPendingSearchFocus(autoTask: boolean, searchModes: string[]) {
+  if (!autoTask) return undefined
+  const modes = (searchModes || []).map((x) => String(x || '').trim().toLowerCase()).filter(Boolean)
+  const hasBili = modes.includes('bili')
+  const hasNetwork = modes.includes('network')
+  const hasDouyin = modes.includes('douyin')
+  if (hasBili && !hasNetwork && !hasDouyin) return 'B站检索中：正在规划学习路径'
+  if (hasNetwork && !hasBili && !hasDouyin) return '联网检索中：正在规划任务'
+  if (hasDouyin && !hasBili && !hasNetwork) return '抖音检索中：正在规划任务'
+  return '多源检索中：正在规划任务'
+}
+
 async function sendMessage() {
   const text = userInput.value.trim()
   const quote = composerQuote.value ? { ...composerQuote.value } : null
@@ -3018,12 +3048,15 @@ async function sendMessage() {
   const clientRequestId = makeClientRequestId()
   const effectiveAutoTask = knowledgeRetrievalEnabled.value && !hasRichContext
   const effectiveSearchModes = effectiveAutoTask ? selectedSearchModes.value : []
+  const initialAssistantPlaceholder = buildPendingAssistantPlaceholder(effectiveAutoTask, effectiveSearchModes)
+  const initialSearchFocus = buildPendingSearchFocus(effectiveAutoTask, effectiveSearchModes)
   const pendingAssistant = appendUiMessage({
     role: 'assistant',
-    content: '',
+    content: initialAssistantPlaceholder,
     pending: true,
     streaming: true,
-    searchProgressVisible: false,
+    searchProgressVisible: Boolean(initialSearchFocus),
+    searchFocusLine: initialSearchFocus,
     renderAsMarkdown: true,
     preferMarkdown: true,
   })
@@ -3108,6 +3141,9 @@ async function sendMessage() {
       let chunk = sanitizeEvidenceTagText(String(textChunk || ''))
       if (!streamStarted) chunk = sanitizeFirstStreamChunk(chunk)
       if (!chunk) return
+      if (!streamStarted && String(pendingAssistant.content || '').trim() === initialAssistantPlaceholder.trim()) {
+        pendingAssistant.content = ''
+      }
       streamStarted = true
       typewriterBuffer += chunk
       if (typewriterTimer === null && typeof window !== 'undefined') {
@@ -3154,6 +3190,9 @@ async function sendMessage() {
           if (backendSearchDispatchEnabled) {
             pendingAssistant.preferMarkdown = true
             pendingAssistant.markdownLabel = pendingAssistant.markdownLabel || '知识整合文档'
+            if (!String(pendingAssistant.content || '').trim()) {
+              pendingAssistant.content = initialAssistantPlaceholder
+            }
             pendingAssistant.searchFocusLine = pendingAssistant.searchFocusLine || '浏览中：准备检索网页'
             pendingAssistant.searchProgressVisible = true
           } else {
@@ -3182,7 +3221,9 @@ async function sendMessage() {
         onStart: () => {
           pendingAssistant.pending = true
           pendingAssistant.streaming = true
-          if (!pendingAssistant.content) pendingAssistant.content = ''
+          if (!String(pendingAssistant.content || '').trim()) {
+            pendingAssistant.content = initialAssistantPlaceholder
+          }
           beginAssistantReplyAutoFollow()
         },
         onDelta: (deltaText) => {

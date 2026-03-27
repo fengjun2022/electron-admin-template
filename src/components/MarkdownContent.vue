@@ -159,6 +159,17 @@ const html = computed(() => {
   text-decoration-thickness: 2px;
 }
 
+.md-content :deep(img) {
+  display: block;
+  max-width: min(100%, 760px);
+  width: auto;
+  height: auto;
+  margin: 0.85rem auto;
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(241, 245, 249, 0.88);
+}
+
 .md-content :deep(li a) {
   display: inline-flex;
   align-items: center;
@@ -213,6 +224,11 @@ const html = computed(() => {
 
 :global(.dark) .md-content :deep(a) {
   color: #93c5fd;
+}
+
+:global(.dark) .md-content :deep(img) {
+  border-color: rgba(148, 163, 184, 0.18);
+  background: rgba(15, 23, 42, 0.42);
 }
 
 :global(.dark) .md-content :deep(li a) {

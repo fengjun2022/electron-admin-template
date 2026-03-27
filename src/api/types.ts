@@ -216,6 +216,22 @@ export interface TopicSelectedVideo {
   [key: string]: unknown
 }
 
+export interface NoteImageAsset {
+  second?: number
+  time_label?: string
+  summary?: string
+  caption?: string
+  score?: number
+  review_reason?: string
+  image_path?: string
+  url?: string
+  bucket?: string
+  object_name?: string
+  file_name?: string
+  mime_type?: string
+  markdown_image?: string
+}
+
 export interface SingleVideoJobResult {
   audio_url?: string
   raw_audio?: string
@@ -227,6 +243,9 @@ export interface SingleVideoJobResult {
   task_state?: string
   queue_runtime?: QueueRuntimeInfo
   cleanup_deleted?: Record<string, string>
+  note_images?: NoteImageAsset[]
+  note_image_upload_errors?: Array<Record<string, unknown>>
+  note_image_reviews?: Array<Record<string, unknown>>
 }
 
 export interface TopicJobResult {
