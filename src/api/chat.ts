@@ -7,6 +7,8 @@ import type {
   ChatSelectCandidateVideosBatchResponse,
   ChatMessagesResponse,
   ChatModelsResponse,
+  ChatPlaylistPreviewMessageRequest,
+  ChatPlaylistPreviewMessageResponse,
   ChatJobNoteMessageRequest,
   ChatJobNoteMessageResponse,
   ChatImageDeleteResponse,
@@ -102,6 +104,17 @@ export function selectChatCandidateVideosBatchApi(
 
 export function resolvePlaylistSeriesApi(payload: PlaylistSeriesResolveRequest) {
   return apiRequest<PlaylistSeriesResolveResponse>('/resources/playlists/resolve', {
+    method: 'POST',
+    body: payload,
+    auth: true,
+  })
+}
+
+export function saveChatPlaylistPreviewMessageApi(
+  sessionUuid: string,
+  payload: ChatPlaylistPreviewMessageRequest,
+) {
+  return apiRequest<ChatPlaylistPreviewMessageResponse>(`/chat/sessions/${sessionUuid}/playlist-preview-message`, {
     method: 'POST',
     body: payload,
     auth: true,

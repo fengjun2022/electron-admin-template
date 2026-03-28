@@ -697,6 +697,18 @@ export interface PlaylistSeriesResolveResponse {
   items: PlaylistSeriesItem[]
 }
 
+export interface ChatPlaylistPreviewMessageRequest {
+  source_title?: string
+  source_url?: string
+  items: PlaylistSeriesItem[]
+}
+
+export interface ChatPlaylistPreviewMessageResponse {
+  ok: boolean
+  session_uuid: string
+  message: ChatMessage
+}
+
 export interface ChatJobNoteMessageRequest {
   markdown_text: string
   file_name?: string

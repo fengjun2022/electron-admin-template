@@ -120,6 +120,94 @@
                       </div>
                     </div>
 
+                    <div v-if="playlistPreviewItems(msg).length" class="mt-3 px-1">
+                      <div class="workflow-playlist-panel">
+                        <div class="flex items-center justify-between gap-2 mb-2">
+                          <div class="text-[11px] font-medium">
+                            视频选集
+                            <span class="opacity-60">{{ msg.playlistCard?.sourceTitle || '未命名合集' }}</span>
+                          </div>
+                          <div class="text-[10px] opacity-60">
+                            {{ playlistPreviewItems(msg).length }} 集
+                          </div>
+                        </div>
+                        <div class="workflow-playlist-panel__layout">
+                          <div class="workflow-playlist-panel__stage">
+                            <div class="workflow-playlist-panel__player">
+                              <video
+                                v-if="playlistPreviewActivePlayableUrl(msg)"
+                                :src="playlistPreviewActivePlayableUrl(msg)"
+                                class="workflow-playlist-panel__player-frame"
+                                controls
+                                autoplay
+                                playsinline
+                                preload="auto"
+                              />
+                              <iframe
+                                v-else-if="playlistPreviewActiveEmbedUrl(msg)"
+                                :src="playlistPreviewActiveEmbedUrl(msg)"
+                                class="workflow-playlist-panel__player-frame"
+                                frameborder="0"
+                                allow="autoplay; fullscreen"
+                                allowfullscreen
+                                scrolling="no"
+                              />
+                              <div v-else class="workflow-playlist-panel__empty">
+                                当前分集暂不支持内嵌播放
+                              </div>
+                            </div>
+                            <div v-if="playlistPreviewActiveEpisode(msg)" class="mt-2">
+                              <div class="text-[12px] font-semibold leading-5 break-words">
+                                {{ candidateDisplayTitle(playlistPreviewActiveEpisode(msg) || ({ title: msg.playlistCard?.sourceTitle || '' } as any), 0) }}
+                              </div>
+                              <div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] opacity-70">
+                                <span v-if="playlistPreviewActiveEpisode(msg)?.up">{{ String(playlistPreviewActiveEpisode(msg)?.up) }}</span>
+                                <span v-if="playlistPreviewActiveEpisode(msg)?.duration">{{ String(playlistPreviewActiveEpisode(msg)?.duration) }}</span>
+                                <span v-if="playlistPreviewActiveEpisode(msg)?.stats">{{ String(playlistPreviewActiveEpisode(msg)?.stats) }}</span>
+                              </div>
+                              <div class="mt-2 flex items-center justify-end gap-1">
+                                <n-button
+                                  size="tiny"
+                                  secondary
+                                  @click="openVideoUrl(playlistPreviewActiveEpisode(msg) || ({ url: msg.playlistCard?.sourceUrl || '' } as any))"
+                                  :disabled="!canOpenVideoUrl(playlistPreviewActiveEpisode(msg) || ({ url: msg.playlistCard?.sourceUrl || '' } as any))"
+                                >
+                                  打开当前集
+                                </n-button>
+                                <n-button
+                                  size="tiny"
+                                  type="primary"
+                                  @click="summarizeWorkflowResource(playlistPreviewActiveEpisode(msg) || ({ url: msg.playlistCard?.sourceUrl || '' } as any))"
+                                  :loading="isSelectingWorkflowResource(playlistPreviewActiveEpisode(msg) || ({ url: msg.playlistCard?.sourceUrl || '' } as any))"
+                                  :disabled="!String((playlistPreviewActiveEpisode(msg)?.url || msg.playlistCard?.sourceUrl || '')).trim() || !chatSessionUuid"
+                                >
+                                  总结当前集
+                                </n-button>
+                              </div>
+                            </div>
+                          </div>
+                          <div class="workflow-playlist-panel__list">
+                            <button
+                              v-for="(seriesVideo, seriesIdx) in playlistPreviewItems(msg)"
+                              :key="`${msg.localId}-${playlistSeriesItemKey(seriesVideo, seriesIdx)}`"
+                              type="button"
+                              class="workflow-playlist-episode"
+                              :class="{ 'workflow-playlist-episode--active': workflowPlaylistEpisodeKey(seriesVideo) === playlistPreviewActiveEpisodeKey(msg) }"
+                              @click="selectPlaylistPreviewEpisode(msg, seriesVideo)"
+                            >
+                              <div class="workflow-playlist-episode__title">
+                                {{ seriesVideo.index || seriesIdx + 1 }}. {{ candidateDisplayTitle(seriesVideo, seriesIdx) }}
+                              </div>
+                              <div class="workflow-playlist-episode__meta">
+                                <span v-if="seriesVideo.duration">{{ String(seriesVideo.duration) }}</span>
+                                <span v-if="seriesVideo.up">{{ String(seriesVideo.up) }}</span>
+                              </div>
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
                     <div
                       v-if="msg.role === 'assistant' && msg.searchProgressVisible"
                       class="mt-2 px-1"
@@ -200,7 +288,7 @@
                                 <button
                                   type="button"
                                   class="ai-candidate-cover__trigger"
-                                  @click="openCandidateFullscreen(video)"
+                                  @click="handleWorkflowResourceCoverClick(video)"
                                 >
                                   <img
                                     v-if="videoCoverUrl(video)"
@@ -407,7 +495,7 @@
                                 <button
                                   type="button"
                                   class="ai-candidate-cover__trigger"
-                                  @click="openCandidateFullscreen(video)"
+                                  @click="handleWorkflowResourceCoverClick(video)"
                                 >
                                   <img
                                     v-if="videoCoverUrl(video)"
@@ -597,7 +685,7 @@
                                 <button
                                   type="button"
                                   class="ai-candidate-cover__trigger"
-                                  @click="openCandidateFullscreen(video)"
+                                  @click="handleWorkflowResourceCoverClick(video)"
                                 >
                                   <img
                                     v-if="videoCoverUrl(video)"
@@ -1637,6 +1725,7 @@ import {
   listChatMessagesApi,
   listChatModelsApi,
   resolvePlaylistSeriesApi,
+  saveChatPlaylistPreviewMessageApi,
   saveChatJobNoteMessageApi,
   selectChatCandidateVideoApi,
   selectChatCandidateVideosBatchApi,
@@ -1683,6 +1772,11 @@ type UiChatMessage = {
   preferMarkdown?: boolean
   agentWorkflowStateKey?: string
   agentWorkflow?: AgentWorkflow | null
+  playlistCard?: {
+    sourceTitle?: string
+    sourceUrl?: string
+    items: TopicSelectedVideo[]
+  } | null
 }
 
 type WorkflowLearningPathSection = {
@@ -1743,6 +1837,7 @@ const workflowPlaylistSeriesOpenState = ref<Record<string, boolean>>({})
 const workflowPlaylistSeriesLoadingState = ref<Record<string, boolean>>({})
 const workflowPlaylistSeriesErrorState = ref<Record<string, string>>({})
 const workflowPlaylistActiveEpisodeState = ref<Record<string, string>>({})
+const playlistPreviewActiveEpisodeState = ref<Record<string, string>>({})
 const candidateSelectionState = ref<Record<string, Record<string, boolean>>>({})
 const batchSelectingJobs = ref<Record<string, boolean>>({})
 const candidatePageState = ref<Record<string, number>>({})
@@ -3155,43 +3250,53 @@ async function loadSessionFromRoute(sessionUuidFromRoute: string) {
     chatStore.setCurrentSession(sessionUuid)
     chatSessionUuid.value = sessionUuid
     const res = await listChatMessagesApi(sessionUuid, 100)
-    const loaded = (res.items || []).map((m) => ({
-      localId: `srv-${m.id || Math.random().toString(36).slice(2, 8)}`,
-      role: (m.role === 'assistant' ? 'assistant' : 'user') as 'assistant' | 'user',
-      content: (String(m.role || '') === 'assistant') ? sanitizeEvidenceTagText(String(m.content || '')) : String(m.content || ''),
-      images: Array.isArray(m.meta?.images) ? (m.meta?.images as UiComposerImage[]) : [],
-      quote: (m.meta?.quote as ChatQuoteReference | null) ?? null,
-      pending: false,
-      task: (m.meta?.task as JobCreateResponse | null) ?? null,
-      taskSnapshot: ((m.meta as any)?.task_snapshot as Record<string, any> | null) ?? null,
-      toolDecisionReason: String(m.meta?.tool_decision?.reason || '').trim() || undefined,
-      autoTask: Boolean(m.meta?.auto_task),
-      knowledgeLookupUsed: Boolean(m.meta?.knowledge_lookup?.used),
-      knowledgeLookupReason: String(m.meta?.knowledge_lookup?.reason || '').trim() || undefined,
-      knowledgeHits: Array.isArray(m.meta?.knowledge_hits) ? (m.meta?.knowledge_hits as Array<Record<string, any>>) : [],
-      renderAsMarkdown: String(m.role || '') === 'assistant',
-      markdownLabel: String((m.meta as any)?.job_note?.file_name || '').trim()
-        ? `Markdown 结果 · ${String((m.meta as any)?.job_note?.file_name || '').trim()}`
-        : (String(m.meta?.message_kind || '') === 'job_markdown')
-          ? 'Markdown 结果'
-          : undefined,
-      jobNoteJobId: String((m.meta as any)?.job_note?.job_id || '').trim() || undefined,
-      searchProgressLogs: Array.isArray((m.meta as any)?.search_dispatch?.logs)
-        ? (((m.meta as any)?.search_dispatch?.logs as Array<any>)
-            .map((x) => ({
-              ts: String(x?.ts || ''),
-              message: pickUrlFromLogRow(x),
-            }))
-            .filter((x) => isHttpUrl(x.message)))
-        : [],
-      searchFocusLine: String(((m.meta as any)?.search_dispatch?.focus_line || '')).trim() || undefined,
-      searchProgressVisible: false,
-      streaming: false,
-      preferMarkdown: false,
-      agentWorkflowStateKey: String((m.meta as any)?.agent_workflow_state_key || '').trim() || undefined,
-      agentWorkflow: ((m.meta as any)?.agent_workflow as AgentWorkflow | null) ?? null,
-    }))
+    const loaded = (res.items || []).map((m) => {
+      const playlistCard = playlistPreviewCardFromMeta(m.meta || {})
+      return {
+        localId: `srv-${m.id || Math.random().toString(36).slice(2, 8)}`,
+        role: (m.role === 'assistant' ? 'assistant' : 'user') as 'assistant' | 'user',
+        content: (String(m.role || '') === 'assistant') ? sanitizeEvidenceTagText(String(m.content || '')) : String(m.content || ''),
+        images: Array.isArray(m.meta?.images) ? (m.meta?.images as UiComposerImage[]) : [],
+        quote: (m.meta?.quote as ChatQuoteReference | null) ?? null,
+        pending: false,
+        task: (m.meta?.task as JobCreateResponse | null) ?? null,
+        taskSnapshot: ((m.meta as any)?.task_snapshot as Record<string, any> | null) ?? null,
+        toolDecisionReason: String(m.meta?.tool_decision?.reason || '').trim() || undefined,
+        autoTask: Boolean(m.meta?.auto_task),
+        knowledgeLookupUsed: Boolean(m.meta?.knowledge_lookup?.used),
+        knowledgeLookupReason: String(m.meta?.knowledge_lookup?.reason || '').trim() || undefined,
+        knowledgeHits: Array.isArray(m.meta?.knowledge_hits) ? (m.meta?.knowledge_hits as Array<Record<string, any>>) : [],
+        renderAsMarkdown: playlistCard ? false : (String(m.role || '') === 'assistant'),
+        markdownLabel: String((m.meta as any)?.job_note?.file_name || '').trim()
+          ? `Markdown 结果 · ${String((m.meta as any)?.job_note?.file_name || '').trim()}`
+          : (String(m.meta?.message_kind || '') === 'job_markdown')
+            ? 'Markdown 结果'
+            : undefined,
+        jobNoteJobId: String((m.meta as any)?.job_note?.job_id || '').trim() || undefined,
+        searchProgressLogs: Array.isArray((m.meta as any)?.search_dispatch?.logs)
+          ? (((m.meta as any)?.search_dispatch?.logs as Array<any>)
+              .map((x) => ({
+                ts: String(x?.ts || ''),
+                message: pickUrlFromLogRow(x),
+              }))
+              .filter((x) => isHttpUrl(x.message)))
+          : [],
+        searchFocusLine: String(((m.meta as any)?.search_dispatch?.focus_line || '')).trim() || undefined,
+        searchProgressVisible: false,
+        streaming: false,
+        preferMarkdown: false,
+        agentWorkflowStateKey: String((m.meta as any)?.agent_workflow_state_key || '').trim() || undefined,
+        agentWorkflow: ((m.meta as any)?.agent_workflow as AgentWorkflow | null) ?? null,
+        playlistCard,
+      }
+    })
     messages.value = loaded
+    const previewState: Record<string, string> = {}
+    for (const msg of loaded) {
+      const first = Array.isArray(msg.playlistCard?.items) ? msg.playlistCard!.items[0] : null
+      if (first) previewState[msg.localId] = workflowPlaylistEpisodeKey(first)
+    }
+    playlistPreviewActiveEpisodeState.value = previewState
     cacheSessionMessages(sessionUuid, loaded)
     maybeAutoOpenTaskRail(latestChatAgentWorkflow.value)
 
@@ -3248,7 +3353,7 @@ function appendUiMessage(payload: Partial<UiChatMessage> & Pick<UiChatMessage, '
     knowledgeLookupUsed: payload.knowledgeLookupUsed,
     knowledgeLookupReason: payload.knowledgeLookupReason,
     knowledgeHits: Array.isArray(payload.knowledgeHits) ? payload.knowledgeHits : [],
-    renderAsMarkdown: payload.role === 'assistant' ? true : payload.renderAsMarkdown,
+    renderAsMarkdown: payload.renderAsMarkdown ?? (payload.role === 'assistant'),
     markdownLabel: payload.markdownLabel,
     jobNoteJobId: payload.jobNoteJobId,
     searchProgressLogs: Array.isArray(payload.searchProgressLogs) ? payload.searchProgressLogs : [],
@@ -3258,6 +3363,7 @@ function appendUiMessage(payload: Partial<UiChatMessage> & Pick<UiChatMessage, '
     preferMarkdown: Boolean(payload.preferMarkdown),
     agentWorkflowStateKey: String(payload.agentWorkflowStateKey || '').trim() || undefined,
     agentWorkflow: payload.agentWorkflow ?? null,
+    playlistCard: payload.playlistCard ?? null,
   }
   messages.value.push(item)
   cacheSessionMessages(chatSessionUuid.value, messages.value)
@@ -3966,6 +4072,18 @@ function handleCandidateCoverClick(jobId: string, video: TopicSelectedVideo) {
   openVideoUrl(video)
 }
 
+function handleWorkflowResourceCoverClick(video: TopicSelectedVideo) {
+  if (isPlaylistResource(video)) {
+    void pushWorkflowPlaylistSeries(video)
+    return
+  }
+  if (canPreviewCandidate(video)) {
+    openCandidateFullscreen(video)
+    return
+  }
+  openVideoUrl(video)
+}
+
 function openCandidateFullscreen(video: TopicSelectedVideo) {
   const playableUrl = videoPlayableUrl(video)
   const embedUrl = videoEmbedUrl(video)
@@ -4191,6 +4309,68 @@ function initializeWorkflowPlaylistActiveEpisode(parentVideo: TopicSelectedVideo
   }
 }
 
+function playlistPreviewItems(msg: UiChatMessage) {
+  return Array.isArray(msg.playlistCard?.items) ? msg.playlistCard!.items! : []
+}
+
+function playlistPreviewActiveEpisode(msg: UiChatMessage) {
+  const items = playlistPreviewItems(msg)
+  if (!items.length) return null
+  const activeKey = String(playlistPreviewActiveEpisodeState.value[msg.localId] || '').trim()
+  return items.find((item) => workflowPlaylistEpisodeKey(item) === activeKey) || items[0] || null
+}
+
+function playlistPreviewActiveEpisodeKey(msg: UiChatMessage) {
+  return workflowPlaylistEpisodeKey(playlistPreviewActiveEpisode(msg) || ({ title: msg.playlistCard?.sourceTitle || '' } as TopicSelectedVideo))
+}
+
+function playlistPreviewActivePlayableUrl(msg: UiChatMessage) {
+  const active = playlistPreviewActiveEpisode(msg)
+  return active ? videoPlayableUrl(active) : ''
+}
+
+function playlistPreviewActiveEmbedUrl(msg: UiChatMessage) {
+  const active = playlistPreviewActiveEpisode(msg)
+  return active ? videoEmbedUrl(active) : ''
+}
+
+function selectPlaylistPreviewEpisode(msg: UiChatMessage, episode: TopicSelectedVideo) {
+  const key = workflowPlaylistEpisodeKey(episode)
+  if (!key) return
+  playlistPreviewActiveEpisodeState.value = {
+    ...playlistPreviewActiveEpisodeState.value,
+    [msg.localId]: key,
+  }
+}
+
+function appendPlaylistPreviewMessage(
+  sourceVideo: TopicSelectedVideo,
+  panel: WorkflowPlaylistSeriesPanel,
+) {
+  const items = Array.isArray(panel.items) ? panel.items : []
+  const preview = appendUiMessage({
+    role: 'assistant',
+    content: `已推送视频选集：${String(panel.source_title || sourceVideo.title || '未命名合集').trim()}`,
+    renderAsMarkdown: false,
+    playlistCard: {
+      sourceTitle: String(panel.source_title || sourceVideo.title || '').trim(),
+      sourceUrl: String(panel.source_url || candidateVideoUrls(sourceVideo).pageUrl || sourceVideo.url || '').trim(),
+      items,
+    },
+  })
+  const initial = items.find((item) => workflowPlaylistEpisodeKey(item) === workflowPlaylistEpisodeKey(sourceVideo)) || items[0] || null
+  if (initial) {
+    playlistPreviewActiveEpisodeState.value = {
+      ...playlistPreviewActiveEpisodeState.value,
+      [preview.localId]: workflowPlaylistEpisodeKey(initial),
+    }
+  }
+  nextTick(() => {
+    const el = messagesContainerRef.value
+    if (el) el.scrollTop = el.scrollHeight
+  }).catch(() => undefined)
+}
+
 function normalizeWorkflowPlaylistItems(items: PlaylistSeriesItem[]) {
   return items
     .filter((item): item is PlaylistSeriesItem => Boolean(item && typeof item === 'object'))
@@ -4212,14 +4392,54 @@ function normalizeWorkflowPlaylistItems(items: PlaylistSeriesItem[]) {
     .filter((item) => Boolean(String(item.url || item.page_url || '').trim()))
 }
 
+function playlistPreviewCardFromMeta(meta: any) {
+  const raw = meta?.playlist_preview
+  if (!raw || typeof raw !== 'object') return null
+  const items = normalizeWorkflowPlaylistItems(Array.isArray(raw.items) ? raw.items : [])
+  if (!items.length) return null
+  return {
+    sourceTitle: String(raw.source_title || '').trim(),
+    sourceUrl: String(raw.source_url || '').trim(),
+    items,
+  }
+}
+
+function appendPersistedPlaylistPreviewMessage(msg: ChatMessage) {
+  const playlistCard = playlistPreviewCardFromMeta(msg?.meta || {})
+  const uiMsg = appendUiMessage({
+    role: 'assistant',
+    content: sanitizeEvidenceTagText(String(msg?.content || '已推送视频选集')),
+    renderAsMarkdown: false,
+    playlistCard,
+  })
+  const initial = Array.isArray(playlistCard?.items) ? playlistCard!.items[0] : null
+  if (initial) {
+    playlistPreviewActiveEpisodeState.value = {
+      ...playlistPreviewActiveEpisodeState.value,
+      [uiMsg.localId]: workflowPlaylistEpisodeKey(initial),
+    }
+  }
+  return uiMsg
+}
+
 async function pushWorkflowPlaylistSeries(video: TopicSelectedVideo) {
   if (!isPlaylistResource(video)) return
   const key = workflowPlaylistSeriesKey(video)
   if (workflowPlaylistSeriesState.value[key]?.items?.length) {
-    workflowPlaylistSeriesOpenState.value = {
-      ...workflowPlaylistSeriesOpenState.value,
-      [key]: !workflowPlaylistSeriesOpenState.value[key],
+    if (chatSessionUuid.value) {
+      try {
+        const saved = await saveChatPlaylistPreviewMessageApi(chatSessionUuid.value, {
+          source_title: String((workflowPlaylistSeriesState.value[key] as WorkflowPlaylistSeriesPanel).source_title || video.title || '').trim(),
+          source_url: String((workflowPlaylistSeriesState.value[key] as WorkflowPlaylistSeriesPanel).source_url || candidateVideoUrls(video).pageUrl || video.url || '').trim(),
+          items: (workflowPlaylistSeriesState.value[key] as WorkflowPlaylistSeriesPanel).items as PlaylistSeriesItem[],
+        })
+        appendPersistedPlaylistPreviewMessage(saved.message)
+        return
+      } catch {
+        // fall back to local-only message
+      }
     }
+    appendPlaylistPreviewMessage(video, workflowPlaylistSeriesState.value[key] as WorkflowPlaylistSeriesPanel)
     return
   }
   const { pageUrl, rawUrl } = candidateVideoUrls(video)
@@ -4229,7 +4449,6 @@ async function pushWorkflowPlaylistSeries(video: TopicSelectedVideo) {
     return
   }
   workflowPlaylistSeriesLoadingState.value = { ...workflowPlaylistSeriesLoadingState.value, [key]: true }
-  workflowPlaylistSeriesOpenState.value = { ...workflowPlaylistSeriesOpenState.value, [key]: true }
   const nextErrors = { ...workflowPlaylistSeriesErrorState.value }
   delete nextErrors[key]
   workflowPlaylistSeriesErrorState.value = nextErrors
@@ -4250,7 +4469,26 @@ async function pushWorkflowPlaylistSeries(video: TopicSelectedVideo) {
         items,
       },
     }
-    workflowPlaylistSeriesOpenState.value = { ...workflowPlaylistSeriesOpenState.value, [key]: true }
+    if (chatSessionUuid.value) {
+      try {
+        const saved = await saveChatPlaylistPreviewMessageApi(chatSessionUuid.value, {
+          source_title: String(res.source_title || video.title || '').trim(),
+          source_url: String(res.source_url || targetUrl).trim(),
+          items: items as PlaylistSeriesItem[],
+        })
+        appendPersistedPlaylistPreviewMessage(saved.message)
+      } catch {
+        appendPlaylistPreviewMessage(video, {
+          ...res,
+          items,
+        })
+      }
+    } else {
+      appendPlaylistPreviewMessage(video, {
+        ...res,
+        items,
+      })
+    }
     message.success(`已推送视频选集到聊天窗口，共 ${items.length} 集`)
   } catch (e: any) {
     workflowPlaylistSeriesErrorState.value = {
