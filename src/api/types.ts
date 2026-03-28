@@ -678,6 +678,25 @@ export interface ChatSelectCandidateVideosBatchResponse {
   queue_batch?: TopicQueueBatchSummary | null
 }
 
+export interface PlaylistSeriesResolveRequest {
+  url: string
+  title?: string
+}
+
+export interface PlaylistSeriesItem extends TopicSelectedVideo {
+  playlist_index?: number
+  playlist_title?: string
+  playlist_url?: string
+}
+
+export interface PlaylistSeriesResolveResponse {
+  ok: boolean
+  source_url: string
+  source_title?: string
+  total?: number
+  items: PlaylistSeriesItem[]
+}
+
 export interface ChatJobNoteMessageRequest {
   markdown_text: string
   file_name?: string

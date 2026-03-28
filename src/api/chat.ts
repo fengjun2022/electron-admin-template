@@ -11,6 +11,8 @@ import type {
   ChatJobNoteMessageResponse,
   ChatImageDeleteResponse,
   ChatImageUploadResponse,
+  PlaylistSeriesResolveRequest,
+  PlaylistSeriesResolveResponse,
   ChatReplyRequest,
   ChatReplyResponse,
   ChatReplyStopRequest,
@@ -92,6 +94,14 @@ export function selectChatCandidateVideosBatchApi(
   payload: ChatSelectCandidateVideosBatchRequest,
 ) {
   return apiRequest<ChatSelectCandidateVideosBatchResponse>(`/chat/sessions/${sessionUuid}/jobs/${jobId}/select-videos-batch`, {
+    method: 'POST',
+    body: payload,
+    auth: true,
+  })
+}
+
+export function resolvePlaylistSeriesApi(payload: PlaylistSeriesResolveRequest) {
+  return apiRequest<PlaylistSeriesResolveResponse>('/resources/playlists/resolve', {
     method: 'POST',
     body: payload,
     auth: true,
