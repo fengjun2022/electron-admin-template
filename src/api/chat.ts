@@ -9,6 +9,9 @@ import type {
   ChatModelsResponse,
   ChatPlaylistPreviewMessageRequest,
   ChatPlaylistPreviewMessageResponse,
+  PlaylistEpisodeNoteBindingRequest,
+  PlaylistEpisodeNotesResponse,
+  PlaylistEpisodeNoteUpsertResponse,
   ChatJobNoteMessageRequest,
   ChatJobNoteMessageResponse,
   ChatImageDeleteResponse,
@@ -115,6 +118,25 @@ export function saveChatPlaylistPreviewMessageApi(
   payload: ChatPlaylistPreviewMessageRequest,
 ) {
   return apiRequest<ChatPlaylistPreviewMessageResponse>(`/chat/sessions/${sessionUuid}/playlist-preview-message`, {
+    method: 'POST',
+    body: payload,
+    auth: true,
+  })
+}
+
+export function listPlaylistEpisodeNotesApi(sessionUuid: string, messageId: number) {
+  return apiRequest<PlaylistEpisodeNotesResponse>(`/chat/sessions/${sessionUuid}/playlist-preview/${messageId}/episode-notes`, {
+    method: 'GET',
+    auth: true,
+  })
+}
+
+export function savePlaylistEpisodeNoteApi(
+  sessionUuid: string,
+  messageId: number,
+  payload: PlaylistEpisodeNoteBindingRequest,
+) {
+  return apiRequest<PlaylistEpisodeNoteUpsertResponse>(`/chat/sessions/${sessionUuid}/playlist-preview/${messageId}/episode-note`, {
     method: 'POST',
     body: payload,
     auth: true,

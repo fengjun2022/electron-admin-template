@@ -709,6 +709,53 @@ export interface ChatPlaylistPreviewMessageResponse {
   message: ChatMessage
 }
 
+export interface PlaylistEpisodeNoteBindingRequest {
+  playlist_source_url?: string
+  playlist_title?: string
+  episode_index?: number | null
+  episode_title?: string
+  episode_url: string
+  child_job_id?: string
+  note_status?: 'pending' | 'ready' | 'failed' | string
+  note_file_name?: string
+  note_message_id?: number | null
+}
+
+export interface PlaylistEpisodeNoteItem {
+  id?: number
+  playlist_message_id?: number
+  playlist_source_url?: string
+  playlist_title?: string
+  episode_index?: number
+  episode_title?: string
+  episode_url?: string
+  canonical_episode_url?: string
+  child_job_id?: string
+  note_status?: 'pending' | 'ready' | 'failed' | string
+  note_file_name?: string
+  note_message_id?: number | null
+  knowledge_video_note_id?: number | null
+  markdown_text?: string
+  note_md_path?: string
+  note_model?: string
+  created_at?: string | null
+  updated_at?: string | null
+}
+
+export interface PlaylistEpisodeNotesResponse {
+  ok: boolean
+  session_uuid: string
+  playlist_message_id: number
+  items: PlaylistEpisodeNoteItem[]
+}
+
+export interface PlaylistEpisodeNoteUpsertResponse {
+  ok: boolean
+  session_uuid: string
+  playlist_message_id: number
+  item: PlaylistEpisodeNoteItem | null
+}
+
 export interface ChatJobNoteMessageRequest {
   markdown_text: string
   file_name?: string
