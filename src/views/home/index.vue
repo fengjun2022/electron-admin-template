@@ -2213,7 +2213,16 @@ function mergeWorkflowStageVideos(...groups: TopicSelectedVideo[][]) {
       out.push(video)
     }
   }
-  return out
+  return out.sort((a, b) => {
+    const ga = workflowResourceGroupType(a)
+    const gb = workflowResourceGroupType(b)
+    const order = { playlist: 1, course: 2, single_video: 3 } as Record<string, number>
+    if (ga !== gb) return (order[ga] || 99) - (order[gb] || 99)
+    const pa = Number((a as any).recommended_priority || 999)
+    const pb = Number((b as any).recommended_priority || 999)
+    if (pa !== pb) return pa - pb
+    return String(a.title || '').localeCompare(String(b.title || ''), 'zh-Hans-CN')
+  })
 }
 
 function workflowLearningPath(workflow?: AgentWorkflow | null) {
@@ -2253,8 +2262,8 @@ function workflowAllResourceVideos(workflow?: AgentWorkflow | null) {
     const pa = Number((a as any).recommended_priority || 999)
     const pb = Number((b as any).recommended_priority || 999)
     if (pa !== pb) return pa - pb
-    const ga = String((a as any).resource_group_type || '').trim()
-    const gb = String((b as any).resource_group_type || '').trim()
+    const ga = workflowResourceGroupType(a)
+    const gb = workflowResourceGroupType(b)
     if (ga !== gb) {
       const order = { playlist: 1, course: 2, single_video: 3 } as Record<string, number>
       return (order[ga] || 99) - (order[gb] || 99)
@@ -2337,12 +2346,10 @@ function workflowSupplementalResourceCardGroups(workflow?: AgentWorkflow | null)
     return key && !used.has(key)
   })
   const grouped = {
-    playlists: extras.filter((video) => String((video as any).resource_group_type || '').trim() === 'playlist'),
-    single_videos: extras.filter((video) => String((video as any).resource_group_type || '').trim() === 'single_video'),
-    courses: extras.filter((video) => String((video as any).resource_group_type || '').trim() === 'course'),
+    single_videos: extras.filter((video) => workflowResourceGroupType(video) === 'single_video'),
+    courses: extras.filter((video) => workflowResourceGroupType(video) === 'course'),
   }
   return [
-    { label: '补充视频合集', items: grouped.playlists.slice(0, 4) },
     { label: '补充单视频', items: grouped.single_videos.slice(0, 6) },
     { label: '补充课程专题', items: grouped.courses.slice(0, 4) },
   ].filter((row) => row.items.length)
@@ -4221,9 +4228,23 @@ function isSelectingWorkflowResource(video: TopicSelectedVideo) {
   return Boolean(selectingVideoState.value[workflowResourceSelectKey(video)])
 }
 
+function looksLikePlaylistTitle(text?: string) {
+  const title = String(text || '').trim().toLowerCase()
+  if (!title) return false
+  return /合集|全集|全\d+集|系列|课程|专题|速成|系统课|连载|完整篇|全套|一口气|入门到/.test(title)
+}
+
 function isPlaylistResource(video: TopicSelectedVideo) {
   const groupType = String((video as any).resource_group_type || '').trim().toLowerCase()
-  return Boolean((video as any).is_playlist) || groupType === 'playlist'
+  const title = String(video.title || '').trim()
+  return Boolean((video as any).is_playlist) || groupType === 'playlist' || looksLikePlaylistTitle(title)
+}
+
+function workflowResourceGroupType(video: TopicSelectedVideo) {
+  if (isPlaylistResource(video)) return 'playlist'
+  const groupType = String((video as any).resource_group_type || '').trim().toLowerCase()
+  if (groupType === 'course') return 'course'
+  return 'single_video'
 }
 
 function workflowPlaylistSeriesKey(video: TopicSelectedVideo) {
