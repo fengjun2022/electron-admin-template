@@ -295,7 +295,7 @@
                               >
                                 <div class="flex items-center justify-between gap-2 mb-2">
                                   <div class="text-[11px] font-medium">
-                                    合集系列
+                                    视频选集
                                     <span class="opacity-60">{{ workflowPlaylistSeriesPanel(video)?.source_title || video.title }}</span>
                                   </div>
                                   <div class="text-[10px] opacity-60">
@@ -308,33 +308,79 @@
                                 <div v-else-if="workflowPlaylistResolveError(video)" class="text-[11px] text-rose-500 py-2">
                                   {{ workflowPlaylistResolveError(video) }}
                                 </div>
-                                <div v-else class="space-y-2 max-h-[260px] overflow-auto pr-1">
-                                  <div
-                                    v-for="(seriesVideo, seriesIdx) in workflowPlaylistSeriesItems(video)"
-                                    :key="playlistSeriesItemKey(seriesVideo, seriesIdx)"
-                                    class="rounded-lg border border-slate-200/70 px-2 py-2"
-                                  >
-                                    <div class="text-[11px] font-medium leading-5 break-words">
-                                      {{ seriesVideo.index || seriesIdx + 1 }}. {{ candidateDisplayTitle(seriesVideo, seriesIdx) }}
+                                <div v-else class="workflow-playlist-panel">
+                                  <div class="workflow-playlist-panel__layout">
+                                    <div class="workflow-playlist-panel__stage">
+                                      <div class="workflow-playlist-panel__player">
+                                        <video
+                                          v-if="workflowPlaylistActivePlayableUrl(video)"
+                                          :src="workflowPlaylistActivePlayableUrl(video)"
+                                          class="workflow-playlist-panel__player-frame"
+                                          controls
+                                          autoplay
+                                          playsinline
+                                          preload="auto"
+                                        />
+                                        <iframe
+                                          v-else-if="workflowPlaylistActiveEmbedUrl(video)"
+                                          :src="workflowPlaylistActiveEmbedUrl(video)"
+                                          class="workflow-playlist-panel__player-frame"
+                                          frameborder="0"
+                                          allow="autoplay; fullscreen"
+                                          allowfullscreen
+                                          scrolling="no"
+                                        />
+                                        <div v-else class="workflow-playlist-panel__empty">
+                                          当前分集暂不支持内嵌播放
+                                        </div>
+                                      </div>
+                                      <div v-if="workflowPlaylistActiveEpisode(video)" class="mt-2">
+                                        <div class="text-[12px] font-semibold leading-5 break-words">
+                                          {{ candidateDisplayTitle(workflowPlaylistActiveEpisode(video) || video, 0) }}
+                                        </div>
+                                        <div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] opacity-70">
+                                          <span v-if="workflowPlaylistActiveEpisode(video)?.up">{{ String(workflowPlaylistActiveEpisode(video)?.up) }}</span>
+                                          <span v-if="workflowPlaylistActiveEpisode(video)?.duration">{{ String(workflowPlaylistActiveEpisode(video)?.duration) }}</span>
+                                          <span v-if="workflowPlaylistActiveEpisode(video)?.stats">{{ String(workflowPlaylistActiveEpisode(video)?.stats) }}</span>
+                                        </div>
+                                        <div class="mt-2 flex items-center justify-end gap-1">
+                                          <n-button
+                                            size="tiny"
+                                            secondary
+                                            @click="openVideoUrl(workflowPlaylistActiveEpisode(video) || video)"
+                                            :disabled="!canOpenVideoUrl(workflowPlaylistActiveEpisode(video) || video)"
+                                          >
+                                            打开当前集
+                                          </n-button>
+                                          <n-button
+                                            size="tiny"
+                                            type="primary"
+                                            @click="summarizeWorkflowResource(workflowPlaylistActiveEpisode(video) || video)"
+                                            :loading="isSelectingWorkflowResource(workflowPlaylistActiveEpisode(video) || video)"
+                                            :disabled="!String((workflowPlaylistActiveEpisode(video) || video).url || '').trim() || !chatSessionUuid"
+                                          >
+                                            总结当前集
+                                          </n-button>
+                                        </div>
+                                      </div>
                                     </div>
-                                    <div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] opacity-70">
-                                      <span v-if="seriesVideo.up">{{ String(seriesVideo.up) }}</span>
-                                      <span v-if="seriesVideo.duration">{{ String(seriesVideo.duration) }}</span>
-                                      <span v-if="seriesVideo.stats">{{ String(seriesVideo.stats) }}</span>
-                                    </div>
-                                    <div class="mt-2 flex items-center justify-end gap-1">
-                                      <n-button size="tiny" secondary @click="openVideoUrl(seriesVideo)" :disabled="!canOpenVideoUrl(seriesVideo)">
-                                        打开原视频
-                                      </n-button>
-                                      <n-button
-                                        size="tiny"
-                                        type="primary"
-                                        @click="summarizeWorkflowResource(seriesVideo)"
-                                        :loading="isSelectingWorkflowResource(seriesVideo)"
-                                        :disabled="!String(seriesVideo.url || '').trim() || !chatSessionUuid"
+                                    <div class="workflow-playlist-panel__list">
+                                      <button
+                                        v-for="(seriesVideo, seriesIdx) in workflowPlaylistSeriesItems(video)"
+                                        :key="playlistSeriesItemKey(seriesVideo, seriesIdx)"
+                                        type="button"
+                                        class="workflow-playlist-episode"
+                                        :class="{ 'workflow-playlist-episode--active': workflowPlaylistEpisodeKey(seriesVideo) === workflowPlaylistActiveEpisodeKey(video) }"
+                                        @click="selectWorkflowPlaylistEpisode(video, seriesVideo)"
                                       >
-                                        总结笔记
-                                      </n-button>
+                                        <div class="workflow-playlist-episode__title">
+                                          {{ seriesVideo.index || seriesIdx + 1 }}. {{ candidateDisplayTitle(seriesVideo, seriesIdx) }}
+                                        </div>
+                                        <div class="workflow-playlist-episode__meta">
+                                          <span v-if="seriesVideo.duration">{{ String(seriesVideo.duration) }}</span>
+                                          <span v-if="seriesVideo.up">{{ String(seriesVideo.up) }}</span>
+                                        </div>
+                                      </button>
                                     </div>
                                   </div>
                                 </div>
@@ -436,7 +482,7 @@
                               >
                                 <div class="flex items-center justify-between gap-2 mb-2">
                                   <div class="text-[11px] font-medium">
-                                    合集系列
+                                    视频选集
                                     <span class="opacity-60">{{ workflowPlaylistSeriesPanel(video)?.source_title || video.title }}</span>
                                   </div>
                                   <div class="text-[10px] opacity-60">
@@ -449,33 +495,79 @@
                                 <div v-else-if="workflowPlaylistResolveError(video)" class="text-[11px] text-rose-500 py-2">
                                   {{ workflowPlaylistResolveError(video) }}
                                 </div>
-                                <div v-else class="space-y-2 max-h-[260px] overflow-auto pr-1">
-                                  <div
-                                    v-for="(seriesVideo, seriesIdx) in workflowPlaylistSeriesItems(video)"
-                                    :key="playlistSeriesItemKey(seriesVideo, seriesIdx)"
-                                    class="rounded-lg border border-slate-200/70 px-2 py-2"
-                                  >
-                                    <div class="text-[11px] font-medium leading-5 break-words">
-                                      {{ seriesVideo.index || seriesIdx + 1 }}. {{ candidateDisplayTitle(seriesVideo, seriesIdx) }}
+                                <div v-else class="workflow-playlist-panel">
+                                  <div class="workflow-playlist-panel__layout">
+                                    <div class="workflow-playlist-panel__stage">
+                                      <div class="workflow-playlist-panel__player">
+                                        <video
+                                          v-if="workflowPlaylistActivePlayableUrl(video)"
+                                          :src="workflowPlaylistActivePlayableUrl(video)"
+                                          class="workflow-playlist-panel__player-frame"
+                                          controls
+                                          autoplay
+                                          playsinline
+                                          preload="auto"
+                                        />
+                                        <iframe
+                                          v-else-if="workflowPlaylistActiveEmbedUrl(video)"
+                                          :src="workflowPlaylistActiveEmbedUrl(video)"
+                                          class="workflow-playlist-panel__player-frame"
+                                          frameborder="0"
+                                          allow="autoplay; fullscreen"
+                                          allowfullscreen
+                                          scrolling="no"
+                                        />
+                                        <div v-else class="workflow-playlist-panel__empty">
+                                          当前分集暂不支持内嵌播放
+                                        </div>
+                                      </div>
+                                      <div v-if="workflowPlaylistActiveEpisode(video)" class="mt-2">
+                                        <div class="text-[12px] font-semibold leading-5 break-words">
+                                          {{ candidateDisplayTitle(workflowPlaylistActiveEpisode(video) || video, 0) }}
+                                        </div>
+                                        <div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] opacity-70">
+                                          <span v-if="workflowPlaylistActiveEpisode(video)?.up">{{ String(workflowPlaylistActiveEpisode(video)?.up) }}</span>
+                                          <span v-if="workflowPlaylistActiveEpisode(video)?.duration">{{ String(workflowPlaylistActiveEpisode(video)?.duration) }}</span>
+                                          <span v-if="workflowPlaylistActiveEpisode(video)?.stats">{{ String(workflowPlaylistActiveEpisode(video)?.stats) }}</span>
+                                        </div>
+                                        <div class="mt-2 flex items-center justify-end gap-1">
+                                          <n-button
+                                            size="tiny"
+                                            secondary
+                                            @click="openVideoUrl(workflowPlaylistActiveEpisode(video) || video)"
+                                            :disabled="!canOpenVideoUrl(workflowPlaylistActiveEpisode(video) || video)"
+                                          >
+                                            打开当前集
+                                          </n-button>
+                                          <n-button
+                                            size="tiny"
+                                            type="primary"
+                                            @click="summarizeWorkflowResource(workflowPlaylistActiveEpisode(video) || video)"
+                                            :loading="isSelectingWorkflowResource(workflowPlaylistActiveEpisode(video) || video)"
+                                            :disabled="!String((workflowPlaylistActiveEpisode(video) || video).url || '').trim() || !chatSessionUuid"
+                                          >
+                                            总结当前集
+                                          </n-button>
+                                        </div>
+                                      </div>
                                     </div>
-                                    <div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] opacity-70">
-                                      <span v-if="seriesVideo.up">{{ String(seriesVideo.up) }}</span>
-                                      <span v-if="seriesVideo.duration">{{ String(seriesVideo.duration) }}</span>
-                                      <span v-if="seriesVideo.stats">{{ String(seriesVideo.stats) }}</span>
-                                    </div>
-                                    <div class="mt-2 flex items-center justify-end gap-1">
-                                      <n-button size="tiny" secondary @click="openVideoUrl(seriesVideo)" :disabled="!canOpenVideoUrl(seriesVideo)">
-                                        打开原视频
-                                      </n-button>
-                                      <n-button
-                                        size="tiny"
-                                        type="primary"
-                                        @click="summarizeWorkflowResource(seriesVideo)"
-                                        :loading="isSelectingWorkflowResource(seriesVideo)"
-                                        :disabled="!String(seriesVideo.url || '').trim() || !chatSessionUuid"
+                                    <div class="workflow-playlist-panel__list">
+                                      <button
+                                        v-for="(seriesVideo, seriesIdx) in workflowPlaylistSeriesItems(video)"
+                                        :key="playlistSeriesItemKey(seriesVideo, seriesIdx)"
+                                        type="button"
+                                        class="workflow-playlist-episode"
+                                        :class="{ 'workflow-playlist-episode--active': workflowPlaylistEpisodeKey(seriesVideo) === workflowPlaylistActiveEpisodeKey(video) }"
+                                        @click="selectWorkflowPlaylistEpisode(video, seriesVideo)"
                                       >
-                                        总结笔记
-                                      </n-button>
+                                        <div class="workflow-playlist-episode__title">
+                                          {{ seriesVideo.index || seriesIdx + 1 }}. {{ candidateDisplayTitle(seriesVideo, seriesIdx) }}
+                                        </div>
+                                        <div class="workflow-playlist-episode__meta">
+                                          <span v-if="seriesVideo.duration">{{ String(seriesVideo.duration) }}</span>
+                                          <span v-if="seriesVideo.up">{{ String(seriesVideo.up) }}</span>
+                                        </div>
+                                      </button>
                                     </div>
                                   </div>
                                 </div>
@@ -578,7 +670,7 @@
                               >
                                 <div class="flex items-center justify-between gap-2 mb-2">
                                   <div class="text-[11px] font-medium">
-                                    合集系列
+                                    视频选集
                                     <span class="opacity-60">{{ workflowPlaylistSeriesPanel(video)?.source_title || video.title }}</span>
                                   </div>
                                   <div class="text-[10px] opacity-60">
@@ -591,33 +683,79 @@
                                 <div v-else-if="workflowPlaylistResolveError(video)" class="text-[11px] text-rose-500 py-2">
                                   {{ workflowPlaylistResolveError(video) }}
                                 </div>
-                                <div v-else class="space-y-2 max-h-[260px] overflow-auto pr-1">
-                                  <div
-                                    v-for="(seriesVideo, seriesIdx) in workflowPlaylistSeriesItems(video)"
-                                    :key="playlistSeriesItemKey(seriesVideo, seriesIdx)"
-                                    class="rounded-lg border border-slate-200/70 px-2 py-2"
-                                  >
-                                    <div class="text-[11px] font-medium leading-5 break-words">
-                                      {{ seriesVideo.index || seriesIdx + 1 }}. {{ candidateDisplayTitle(seriesVideo, seriesIdx) }}
+                                <div v-else class="workflow-playlist-panel">
+                                  <div class="workflow-playlist-panel__layout">
+                                    <div class="workflow-playlist-panel__stage">
+                                      <div class="workflow-playlist-panel__player">
+                                        <video
+                                          v-if="workflowPlaylistActivePlayableUrl(video)"
+                                          :src="workflowPlaylistActivePlayableUrl(video)"
+                                          class="workflow-playlist-panel__player-frame"
+                                          controls
+                                          autoplay
+                                          playsinline
+                                          preload="auto"
+                                        />
+                                        <iframe
+                                          v-else-if="workflowPlaylistActiveEmbedUrl(video)"
+                                          :src="workflowPlaylistActiveEmbedUrl(video)"
+                                          class="workflow-playlist-panel__player-frame"
+                                          frameborder="0"
+                                          allow="autoplay; fullscreen"
+                                          allowfullscreen
+                                          scrolling="no"
+                                        />
+                                        <div v-else class="workflow-playlist-panel__empty">
+                                          当前分集暂不支持内嵌播放
+                                        </div>
+                                      </div>
+                                      <div v-if="workflowPlaylistActiveEpisode(video)" class="mt-2">
+                                        <div class="text-[12px] font-semibold leading-5 break-words">
+                                          {{ candidateDisplayTitle(workflowPlaylistActiveEpisode(video) || video, 0) }}
+                                        </div>
+                                        <div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] opacity-70">
+                                          <span v-if="workflowPlaylistActiveEpisode(video)?.up">{{ String(workflowPlaylistActiveEpisode(video)?.up) }}</span>
+                                          <span v-if="workflowPlaylistActiveEpisode(video)?.duration">{{ String(workflowPlaylistActiveEpisode(video)?.duration) }}</span>
+                                          <span v-if="workflowPlaylistActiveEpisode(video)?.stats">{{ String(workflowPlaylistActiveEpisode(video)?.stats) }}</span>
+                                        </div>
+                                        <div class="mt-2 flex items-center justify-end gap-1">
+                                          <n-button
+                                            size="tiny"
+                                            secondary
+                                            @click="openVideoUrl(workflowPlaylistActiveEpisode(video) || video)"
+                                            :disabled="!canOpenVideoUrl(workflowPlaylistActiveEpisode(video) || video)"
+                                          >
+                                            打开当前集
+                                          </n-button>
+                                          <n-button
+                                            size="tiny"
+                                            type="primary"
+                                            @click="summarizeWorkflowResource(workflowPlaylistActiveEpisode(video) || video)"
+                                            :loading="isSelectingWorkflowResource(workflowPlaylistActiveEpisode(video) || video)"
+                                            :disabled="!String((workflowPlaylistActiveEpisode(video) || video).url || '').trim() || !chatSessionUuid"
+                                          >
+                                            总结当前集
+                                          </n-button>
+                                        </div>
+                                      </div>
                                     </div>
-                                    <div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] opacity-70">
-                                      <span v-if="seriesVideo.up">{{ String(seriesVideo.up) }}</span>
-                                      <span v-if="seriesVideo.duration">{{ String(seriesVideo.duration) }}</span>
-                                      <span v-if="seriesVideo.stats">{{ String(seriesVideo.stats) }}</span>
-                                    </div>
-                                    <div class="mt-2 flex items-center justify-end gap-1">
-                                      <n-button size="tiny" secondary @click="openVideoUrl(seriesVideo)" :disabled="!canOpenVideoUrl(seriesVideo)">
-                                        打开原视频
-                                      </n-button>
-                                      <n-button
-                                        size="tiny"
-                                        type="primary"
-                                        @click="summarizeWorkflowResource(seriesVideo)"
-                                        :loading="isSelectingWorkflowResource(seriesVideo)"
-                                        :disabled="!String(seriesVideo.url || '').trim() || !chatSessionUuid"
+                                    <div class="workflow-playlist-panel__list">
+                                      <button
+                                        v-for="(seriesVideo, seriesIdx) in workflowPlaylistSeriesItems(video)"
+                                        :key="playlistSeriesItemKey(seriesVideo, seriesIdx)"
+                                        type="button"
+                                        class="workflow-playlist-episode"
+                                        :class="{ 'workflow-playlist-episode--active': workflowPlaylistEpisodeKey(seriesVideo) === workflowPlaylistActiveEpisodeKey(video) }"
+                                        @click="selectWorkflowPlaylistEpisode(video, seriesVideo)"
                                       >
-                                        总结笔记
-                                      </n-button>
+                                        <div class="workflow-playlist-episode__title">
+                                          {{ seriesVideo.index || seriesIdx + 1 }}. {{ candidateDisplayTitle(seriesVideo, seriesIdx) }}
+                                        </div>
+                                        <div class="workflow-playlist-episode__meta">
+                                          <span v-if="seriesVideo.duration">{{ String(seriesVideo.duration) }}</span>
+                                          <span v-if="seriesVideo.up">{{ String(seriesVideo.up) }}</span>
+                                        </div>
+                                      </button>
                                     </div>
                                   </div>
                                 </div>
@@ -1604,6 +1742,7 @@ const workflowPlaylistSeriesState = ref<Record<string, WorkflowPlaylistSeriesPan
 const workflowPlaylistSeriesOpenState = ref<Record<string, boolean>>({})
 const workflowPlaylistSeriesLoadingState = ref<Record<string, boolean>>({})
 const workflowPlaylistSeriesErrorState = ref<Record<string, string>>({})
+const workflowPlaylistActiveEpisodeState = ref<Record<string, string>>({})
 const candidateSelectionState = ref<Record<string, Record<string, boolean>>>({})
 const batchSelectingJobs = ref<Record<string, boolean>>({})
 const candidatePageState = ref<Record<string, number>>({})
@@ -3766,6 +3905,22 @@ function extractBvid(text: string) {
   return m ? m[0] : ''
 }
 
+function extractBiliPageNumber(video: TopicSelectedVideo) {
+  const { pageUrl, rawUrl } = candidateVideoUrls(video)
+  const probe = String(pageUrl || rawUrl || '').trim()
+  if (!probe) return 1
+  try {
+    const url = new URL(probe)
+    const page = Number(url.searchParams.get('p') || '1')
+    if (Number.isFinite(page) && page > 0) return Math.floor(page)
+  } catch {
+    // ignore
+  }
+  const m = probe.match(/[?&]p=(\d+)/i)
+  if (m?.[1]) return Math.max(1, Number(m[1]) || 1)
+  return 1
+}
+
 function videoPlayableUrl(video: TopicSelectedVideo) {
   if (!isDouyinCandidate(video)) return ''
   const { playUrl, pageUrl } = candidateVideoUrls(video)
@@ -3782,9 +3937,10 @@ function videoPlayableUrl(video: TopicSelectedVideo) {
 
 function videoEmbedUrl(video: TopicSelectedVideo) {
   if (isDouyinCandidate(video)) return ''
-  const bvid = extractBvid(String(video.url || '')) || extractBvid(String(video.title || ''))
+  const { pageUrl, rawUrl } = candidateVideoUrls(video)
+  const bvid = extractBvid(String(pageUrl || rawUrl || '')) || extractBvid(String(video.title || ''))
   if (!bvid) return ''
-  return `https://player.bilibili.com/player.html?bvid=${encodeURIComponent(bvid)}&page=1`
+  return `https://player.bilibili.com/player.html?bvid=${encodeURIComponent(bvid)}&page=${extractBiliPageNumber(video)}`
 }
 
 function canPreviewCandidate(video: TopicSelectedVideo) {
@@ -3978,12 +4134,61 @@ function workflowPlaylistResolveError(video: TopicSelectedVideo) {
 
 function workflowPlaylistActionLabel(video: TopicSelectedVideo) {
   if (isWorkflowPlaylistLoading(video)) return '推送中'
-  if (isWorkflowPlaylistOpen(video) && workflowPlaylistSeriesItems(video).length) return '收起合集'
-  return '推送合集'
+  if (isWorkflowPlaylistOpen(video) && workflowPlaylistSeriesItems(video).length) return '收起选集'
+  return '推送选集'
 }
 
 function playlistSeriesItemKey(video: TopicSelectedVideo, idx: number) {
   return `${workflowPlaylistSeriesKey(video)}::${videoPreviewKey(video) || String(video.url || video.title || idx)}`
+}
+
+function workflowPlaylistEpisodeKey(video: TopicSelectedVideo) {
+  return videoPreviewKey(video) || String(video.url || video.title || '')
+}
+
+function workflowPlaylistActiveEpisode(video: TopicSelectedVideo) {
+  const parentKey = workflowPlaylistSeriesKey(video)
+  const items = workflowPlaylistSeriesItems(video)
+  if (!items.length) return null
+  const activeKey = String(workflowPlaylistActiveEpisodeState.value[parentKey] || '').trim()
+  return items.find((item) => workflowPlaylistEpisodeKey(item) === activeKey) || items[0] || null
+}
+
+function workflowPlaylistActiveEpisodeKey(video: TopicSelectedVideo) {
+  return workflowPlaylistEpisodeKey(workflowPlaylistActiveEpisode(video) || video)
+}
+
+function workflowPlaylistActivePlayableUrl(video: TopicSelectedVideo) {
+  const active = workflowPlaylistActiveEpisode(video)
+  return active ? videoPlayableUrl(active) : ''
+}
+
+function workflowPlaylistActiveEmbedUrl(video: TopicSelectedVideo) {
+  const active = workflowPlaylistActiveEpisode(video)
+  return active ? videoEmbedUrl(active) : ''
+}
+
+function selectWorkflowPlaylistEpisode(parentVideo: TopicSelectedVideo, episode: TopicSelectedVideo) {
+  const parentKey = workflowPlaylistSeriesKey(parentVideo)
+  const episodeKey = workflowPlaylistEpisodeKey(episode)
+  if (!episodeKey) return
+  workflowPlaylistActiveEpisodeState.value = {
+    ...workflowPlaylistActiveEpisodeState.value,
+    [parentKey]: episodeKey,
+  }
+}
+
+function initializeWorkflowPlaylistActiveEpisode(parentVideo: TopicSelectedVideo, items: TopicSelectedVideo[]) {
+  const parentKey = workflowPlaylistSeriesKey(parentVideo)
+  const current = String(workflowPlaylistActiveEpisodeState.value[parentKey] || '').trim()
+  if (current) return
+  const targetKey = workflowPlaylistEpisodeKey(parentVideo)
+  const matched = items.find((item) => workflowPlaylistEpisodeKey(item) === targetKey) || items[0] || null
+  if (!matched) return
+  workflowPlaylistActiveEpisodeState.value = {
+    ...workflowPlaylistActiveEpisodeState.value,
+    [parentKey]: workflowPlaylistEpisodeKey(matched),
+  }
 }
 
 function normalizeWorkflowPlaylistItems(items: PlaylistSeriesItem[]) {
@@ -4037,6 +4242,7 @@ async function pushWorkflowPlaylistSeries(video: TopicSelectedVideo) {
     if (!items.length) {
       throw new Error('合集里没有解析到可用视频')
     }
+    initializeWorkflowPlaylistActiveEpisode(video, items)
     workflowPlaylistSeriesState.value = {
       ...workflowPlaylistSeriesState.value,
       [key]: {
@@ -4045,13 +4251,13 @@ async function pushWorkflowPlaylistSeries(video: TopicSelectedVideo) {
       },
     }
     workflowPlaylistSeriesOpenState.value = { ...workflowPlaylistSeriesOpenState.value, [key]: true }
-    message.success(`已推送合集到页面，共 ${items.length} 集`)
+    message.success(`已推送视频选集到聊天窗口，共 ${items.length} 集`)
   } catch (e: any) {
     workflowPlaylistSeriesErrorState.value = {
       ...workflowPlaylistSeriesErrorState.value,
-      [key]: String(e?.message || '推送合集失败').trim(),
+      [key]: String(e?.message || '推送选集失败').trim(),
     }
-    message.error(e?.message || '推送合集失败')
+    message.error(e?.message || '推送选集失败')
   } finally {
     const nextLoading = { ...workflowPlaylistSeriesLoadingState.value }
     delete nextLoading[key]
@@ -5456,6 +5662,109 @@ function humanizeSidebarLog(text: string) {
   letter-spacing: 0.01em;
 }
 
+.workflow-playlist-panel {
+  margin-top: 8px;
+  border-radius: 14px;
+  border: 1px solid rgba(203, 213, 225, 0.8);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.92));
+  padding: 10px;
+}
+
+.workflow-playlist-panel__layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(240px, 0.95fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.workflow-playlist-panel__stage {
+  min-width: 0;
+}
+
+.workflow-playlist-panel__player {
+  position: relative;
+  overflow: hidden;
+  border-radius: 12px;
+  border: 1px solid rgba(203, 213, 225, 0.82);
+  background: #0f172a;
+  aspect-ratio: 16 / 9;
+}
+
+.workflow-playlist-panel__player-frame {
+  width: 100%;
+  height: 100%;
+  display: block;
+  border: 0;
+  background: #0f172a;
+}
+
+.workflow-playlist-panel__empty {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(226, 232, 240, 0.88);
+  font-size: 12px;
+}
+
+.workflow-playlist-panel__list {
+  max-height: 360px;
+  overflow: auto;
+  display: grid;
+  gap: 8px;
+  padding-right: 2px;
+}
+
+.workflow-playlist-episode {
+  width: 100%;
+  text-align: left;
+  border-radius: 12px;
+  border: 1px solid rgba(203, 213, 225, 0.78);
+  background: rgba(255, 255, 255, 0.9);
+  padding: 10px 12px;
+  transition: border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+}
+
+.workflow-playlist-episode:hover {
+  border-color: rgba(59, 130, 246, 0.34);
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
+  transform: translateY(-1px);
+}
+
+.workflow-playlist-episode--active {
+  border-color: rgba(37, 99, 235, 0.42);
+  background: rgba(239, 246, 255, 0.96);
+  box-shadow: 0 8px 20px rgba(37, 99, 235, 0.12);
+}
+
+.workflow-playlist-episode__title {
+  font-size: 12px;
+  line-height: 1.5;
+  font-weight: 600;
+  color: #0f172a;
+  word-break: break-word;
+}
+
+.workflow-playlist-episode__meta {
+  margin-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  font-size: 10px;
+  color: rgba(71, 85, 105, 0.82);
+}
+
+@media (max-width: 960px) {
+  .workflow-playlist-panel__layout {
+    grid-template-columns: 1fr;
+  }
+
+  .workflow-playlist-panel__list {
+    max-height: 240px;
+  }
+}
+
 /* ── Knowledge Hit Panel ───────────────────────────────── */
 .knowledge-hit-panel {
   background: #fff;
@@ -5718,6 +6027,38 @@ function humanizeSidebarLog(text: string) {
   border-color: rgba(75, 85, 99, 0.72);
   background: rgba(15, 23, 42, 0.35);
   box-shadow: inset 0 1px 0 rgba(148, 163, 184, 0.04);
+}
+
+:global(.dark) .workflow-playlist-panel {
+  border-color: rgba(71, 85, 105, 0.68);
+  background: linear-gradient(180deg, rgba(17, 24, 39, 0.72), rgba(30, 41, 59, 0.56));
+}
+
+:global(.dark) .workflow-playlist-panel__player {
+  border-color: rgba(71, 85, 105, 0.72);
+}
+
+:global(.dark) .workflow-playlist-episode {
+  border-color: rgba(71, 85, 105, 0.62);
+  background: rgba(15, 23, 42, 0.46);
+}
+
+:global(.dark) .workflow-playlist-episode:hover {
+  border-color: rgba(96, 165, 250, 0.42);
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.22);
+}
+
+:global(.dark) .workflow-playlist-episode--active {
+  border-color: rgba(96, 165, 250, 0.48);
+  background: rgba(30, 41, 59, 0.88);
+}
+
+:global(.dark) .workflow-playlist-episode__title {
+  color: rgba(241, 245, 249, 0.97);
+}
+
+:global(.dark) .workflow-playlist-episode__meta {
+  color: rgba(203, 213, 225, 0.78);
 }
 
 :global(.dark) .message-user {
